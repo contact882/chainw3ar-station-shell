@@ -69,37 +69,61 @@ every posture, injects the chord, and proves both the exits AND the lockdown.
 Re-run it after any change to exits, windows, or shortcut plumbing; a row
 without a gate case is UNVERIFIED by definition.
 
+**The primary dev escape is `station-shell.exe --quit` — no keyboard in the
+loop.** The chord (below) is the convenience for when no terminal is handy.
+
 Since incident #2 (2026-08-01: an armed chord failed in the field and left
 zero evidence), **arming is a proof, not a claim**: every armed launch
-registers the chord plus a canary hotkey, drives a synthetic canary press
-through the full OS→pump→handler chain, and only then logs
-`dev exit chord armed (delivery verified)`. If the canary never comes back the
+registers the chord, injects a synthetic TAP of that same chord through the
+full OS→pump→handler chain, and only then logs
+`dev exit chord armed (delivery verified)`. If the tap never comes back the
 launch REFUSES to run (exit 71); if another process holds the chord, the
 launch aborts with no "armed" line at all. The canary proves every software
-layer — it cannot prove a physical keyboard can form the 4-key chord. That is
+layer — it cannot prove a physical keyboard can form the chord. That is
 `--exit-probe`'s job: step 1 re-proves the synthetic chain, step 2 demands a
-REAL press within 15s (run it once per machine/keyboard; exit code is the
+REAL 2-second hold (run it once per machine/keyboard; exit code is the
 verdict).
+
+**HARDWARE FINDING — why the chord is 3 keys held, not 4 keys (settled, do
+not re-litigate):** proven as a controlled pair on the reference machine,
+2026-08-01, **same keyboard, same session, ~27 minutes apart**:
+
+- 4-key **Ctrl+Alt+Shift+Q** — `--exit-probe` step 1 (synthetic) **PASS**,
+  step 2 (physical press) **FAIL** (~23:06Z).
+- 3-key **Ctrl+Shift+F12 held 2s** — step 1 **PASS**, step 2 (physical hold)
+  **PASS** (23:33:32Z, founder's hands).
+
+Synthetic delivery passing both times proves the software chain was never
+broken; the only changed variable is chord shape — the membrane keyboard
+cannot form 4 simultaneous keys (rollover limit), and the 09:16 lockout that
+morning was exactly that. Not machine, not software, not timing: chord
+shape. The chord is now
+**Ctrl+Shift+F12 held for 2 full seconds**: two modifiers + one key is the
+most rollover-safe chord shape there is (the standard app-shortcut shape),
+no Alt avoids AltGr collisions on international layouts, and accidental
+presses are resisted twice — spatially (bottom-left modifier pair + top-right
+F12: a brushing or resting gloved hand produces adjacent clusters, not
+sustained opposite-corner triples) and temporally (a sub-2s press does
+nothing — gate-pinned — and at fire time the shell re-checks the keys are
+physically down, so a transient ghost or lost release can never fire it).
+Anyone proposing a 4-key chord again: this paragraph is the answer.
 
 | Route | Status on this machine |
 |---|---|
-| **Ctrl+Alt+Shift+Q** (debug build, no flags) | **EXITS cleanly — gate-verified 2026-08-01.** Debug builds arm by default, so `cargo run` is never a trap; `--no-dev-exit` disarms deliberately. |
-| **Ctrl+Alt+Shift+Q** (release + `--dev-exit`) | **EXITS cleanly — gate-verified 2026-08-01**, all four postures (windowed/kiosk × sim/no-sim), synthetic input. Physical-keyboard proof: `--exit-probe`. |
-| **`station-shell.exe --quit`** (any terminal) | **EXITS the running instance cleanly — gate-verified 2026-08-01** when that instance armed dev-exit; **refused + logged in lockdown posture** (also gate-verified). Exit 3 when nothing is running. The dev exit that depends on no flag memory and no keyboard. |
-| QUIT SHELL button (`--sim`) | **EXITS cleanly — VERIFIED.** Now lives in a fixed footer, always on-screen (incident #2: it sat below the fold of the 720px sim window; vitest-pinned). In kiosk+sim the console can still be BURIED behind the fullscreen kiosk once you touch the operator surface — reach for the chord or `--quit` instead of hunting windows. |
-| Ctrl+Alt+Shift+Q (release, no flag) | **Does nothing — gate-verified.** That's the lockdown; the startup WARN marks the trap in the log. |
+| **`station-shell.exe --quit`** (any terminal) | **PRIMARY. EXITS the running instance cleanly — gate-verified 2026-08-01** when that instance armed dev-exit; **refused + logged in lockdown posture** (also gate-verified). Exit 3 when nothing is running. No flag memory, no keyboard. |
+| **Ctrl+Shift+F12 held 2s** (debug build, no flags) | **EXITS cleanly — gate-verified 2026-08-01.** Debug builds arm by default, so `cargo run` is never a trap; `--no-dev-exit` disarms deliberately. |
+| **Ctrl+Shift+F12 held 2s** (release + `--dev-exit`) | **EXITS cleanly — gate-verified 2026-08-01**, all four postures (windowed/kiosk × sim/no-sim), synthetic input. A sub-hold tap does NOT exit (gate case 0). Physical proof per keyboard: `--exit-probe`. |
+| QUIT SHELL button (`--sim`) | **EXITS cleanly — VERIFIED.** Lives in a fixed footer, always on-screen (incident #2: it sat below the fold of the 720px sim window; vitest-pinned). In kiosk+sim the console can still be BURIED behind the fullscreen kiosk once you touch the operator surface — reach for `--quit` or the chord instead of hunting windows. |
+| Ctrl+Shift+F12 (release, no flag) | **Does nothing — gate-verified.** That's the lockdown; the startup WARN marks the trap in the log. |
 | Alt+F4 | **Does nothing — VERIFIED** (close-prevented by design). |
 | Ctrl+Shift+Esc | **Task Manager opens BEHIND the kiosk — VERIFIED.** Blind; do not rely on it. |
 | Ctrl+Alt+Del → Sign out / Win+Ctrl+D | **UNVERIFIED.** Both failed in the field; do not rely on them. |
-| `taskkill /f /im station-shell.exe` | Works **from an existing shell** (VERIFIED). Remote access only on a bare kiosk. Prefer `--quit` on dev machines — it's graceful and logged. |
+| `taskkill /f /im station-shell.exe` | Works **from an existing shell** (VERIFIED). Remote access only on a bare kiosk. Prefer `--quit` — it's graceful and logged. |
 
 - **Standard dev/integration launch: `station-shell.exe --dev-exit --sim`**
   (or plain `cargo run`, which is debug and therefore armed).
-- **Known residual:** one field failure of a physically pressed chord
-  (2026-08-01 09:16, armed + delivery-healthy configuration) remains
-  unreproduced — every synthetic layer passes the gate, so the physical input
-  path is the suspect. `--exit-probe` on the affected keyboard is the
-  discriminating test; `--quit` removes the keyboard from the loop entirely.
+- While a dev-exit instance runs, Ctrl+Shift+F12 is captured system-wide on
+  that machine (RegisterHotKey) — expected during dev sessions only.
 - **Production**: recovery is the supervisor runbook in `DEPLOYMENT.md`
   (self-recovery → remote administrative restart → power cycle); never put
   `--dev-exit` in a floor launch configuration. A production kiosk refuses

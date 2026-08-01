@@ -19,6 +19,8 @@ $Exe = (Resolve-Path $Exe).Path
 $LogFile = Join-Path $env:APPDATA "com.chainw3ar.station\logs\shell.log.$(Get-Date -Format yyyy-MM-dd)"
 $Fails = 0
 
+# Chord since incident #2's hardware finding: Ctrl+Shift+F12 HELD 2s.
+# (The 4-key Ctrl+Alt+Shift+Q failed on the reference membrane keyboard.)
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -26,11 +28,13 @@ public class ExitGateNative {
     [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll", SetLastError=true)] public static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id);
-    public static void FireChord() {
-        keybd_event(0x11,0,0,UIntPtr.Zero); keybd_event(0x12,0,0,UIntPtr.Zero); keybd_event(0x10,0,0,UIntPtr.Zero);
-        keybd_event(0x51,0,0,UIntPtr.Zero); keybd_event(0x51,0,2,UIntPtr.Zero);
-        keybd_event(0x10,0,2,UIntPtr.Zero); keybd_event(0x12,0,2,UIntPtr.Zero); keybd_event(0x11,0,2,UIntPtr.Zero);
-    }
+    // Ctrl=0x11 Shift=0x10 F12=0x7B
+    static void Down() { keybd_event(0x11,0,0,UIntPtr.Zero); keybd_event(0x10,0,0,UIntPtr.Zero); keybd_event(0x7B,0,0,UIntPtr.Zero); }
+    static void Up()   { keybd_event(0x7B,0,2,UIntPtr.Zero); keybd_event(0x10,0,2,UIntPtr.Zero); keybd_event(0x11,0,2,UIntPtr.Zero); }
+    // Short tap: must NEVER exit the shell (sub-hold accidental press).
+    public static void TapChord() { Down(); System.Threading.Thread.Sleep(300); Up(); }
+    // Sustained hold past the 2s requirement: must exit an armed shell.
+    public static void HoldChord() { Down(); System.Threading.Thread.Sleep(2600); Up(); }
 }
 '@
 
@@ -75,7 +79,19 @@ if (Get-Process station-shell -ErrorAction SilentlyContinue) {
     exit 1
 }
 
-# ---- Cases 1-4: armed launches must exit on the chord, all postures --------
+# ---- Case 0: a short TAP must NOT exit (accidental-press pin) --------------
+Write-Host "case: short tap does NOT exit (hold requirement)"
+$mark = Get-LogLen
+$p = Start-Process -FilePath $Exe -ArgumentList @("--windowed", "--dev-exit") -PassThru
+Assert (Wait-Pattern "dev exit chord armed (delivery verified)" $mark 15) "canary-verified arming logged"
+[ExitGateNative]::TapChord()
+Start-Sleep -Seconds 4
+Assert (-not $p.HasExited) "still running after sub-hold tap"
+[ExitGateNative]::HoldChord()
+Assert ($p.WaitForExit(8000)) "then exits on a sustained hold"
+if (-not $p.HasExited) { Stop-Leftovers }
+
+# ---- Cases 1-4: armed launches must exit on the held chord, all postures ----
 $ArmedCases = @(
     @{ Name = "windowed --dev-exit --sim"; Args = @("--windowed", "--dev-exit", "--sim") },
     @{ Name = "windowed --dev-exit";       Args = @("--windowed", "--dev-exit") },
@@ -83,12 +99,12 @@ $ArmedCases = @(
     @{ Name = "KIOSK    --dev-exit";       Args = @("--dev-exit") }
 )
 foreach ($case in $ArmedCases) {
-    Write-Host "case: chord exits [$($case.Name)]"
+    Write-Host "case: held chord exits [$($case.Name)]"
     $mark = Get-LogLen
     $p = Start-Process -FilePath $Exe -ArgumentList $case.Args -PassThru
     Assert (Wait-Pattern "dev exit chord armed (delivery verified)" $mark 15) "canary-verified arming logged"
-    [ExitGateNative]::FireChord()
-    Assert ($p.WaitForExit(8000)) "process exited on chord"
+    [ExitGateNative]::HoldChord()
+    Assert ($p.WaitForExit(8000)) "process exited on held chord"
     if (-not $p.HasExited) { Stop-Leftovers }
     else { Assert ($p.ExitCode -eq 0) "exit code 0 (got $($p.ExitCode))" }
     Assert ((Read-NewLog $mark) -match "shutting down cleanly") "clean-shutdown line logged"
@@ -111,9 +127,9 @@ $mark = Get-LogLen
 $p = Start-Process -FilePath $Exe -PassThru
 Assert (Wait-Pattern "kiosk launch without exit chord" $mark 15) "no-local-escape WARNING logged"
 Start-Sleep -Seconds 2
-[ExitGateNative]::FireChord()
+[ExitGateNative]::HoldChord()
 Start-Sleep -Seconds 3
-Assert (-not $p.HasExited) "still running after injected chord"
+Assert (-not $p.HasExited) "still running after injected held chord"
 $sender = Start-Process -FilePath $Exe -ArgumentList @("--quit") -PassThru -Wait
 Assert ($sender.ExitCode -eq 0) "quit sender delivered (exit 0)"
 Assert (Wait-Pattern "quit refused" $mark 8) "refusal logged (lockdown posture)"
@@ -130,8 +146,9 @@ Assert ($sender.ExitCode -eq 3) "exit 3 = nothing to quit (got $($sender.ExitCod
 # ---- Case 8: a held chord makes an armed launch REFUSE (never silent) ------
 Write-Host "case: chord held by another process -> armed launch aborts"
 $mark = Get-LogLen
-$held = [ExitGateNative]::RegisterHotKey([IntPtr]::Zero, 0x0C0E, 0x7, 0x51)
-Assert $held "gate holds Ctrl+Alt+Shift+Q"
+# MOD_CONTROL(0x2)|MOD_SHIFT(0x4) + VK_F12(0x7B)
+$held = [ExitGateNative]::RegisterHotKey([IntPtr]::Zero, 0x0C0E, 0x6, 0x7B)
+Assert $held "gate holds Ctrl+Shift+F12"
 $p = Start-Process -FilePath $Exe -ArgumentList @("--windowed", "--dev-exit") -PassThru
 $exited = $p.WaitForExit(15000)
 Assert $exited "launch aborted instead of running unarmed"

@@ -66,9 +66,12 @@ image change.
 
 **Exit-path verification (dev/integration machines):** before trusting a dev
 box's escape hatch, run `scripts\exit-gate.ps1` (automated: every armed
-posture exits, lockdown holds, `--quit` round-trips) and `--exit-probe` once
-per physical keyboard (the only test that proves a keyboard can form the
-4-key chord — synthetic input bypasses the key matrix; incident #2).
+posture exits on the held chord, a sub-hold tap does not, lockdown holds,
+`--quit` round-trips) and `--exit-probe` once per physical keyboard — the
+only test that proves a keyboard can form and sustain the chord; synthetic
+input bypasses the key matrix. Incident #2 proof of necessity: the original
+4-key chord passed every synthetic layer and failed the physical press
+(membrane rollover), which is why the chord is now Ctrl+Shift+F12 held 2s.
 
 The process exits deliberately only when: the fault screen itself cannot be
 created (exit **70** — WebView2 environment unusable) or a fatal startup

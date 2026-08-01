@@ -17,9 +17,9 @@ pub struct Cli {
     /// Guided hardware verification of the detection path against the real
     /// reader (no windows, no webview). Exit 0/1.
     pub reader_probe: bool,
-    /// Dev escape hatch: enables the Ctrl+Alt+Shift+Q exit chord in kiosk
-    /// mode. Without this flag the chord's listener is never even injected
-    /// and the command refuses — production lockdown is unchanged.
+    /// Dev escape hatch: enables the exit chord (Ctrl+Shift+F12 held 2s) in
+    /// kiosk mode. Without this flag the chord's listener is never even
+    /// injected and the command refuses — production lockdown is unchanged.
     pub dev_exit: bool,
     /// Ask a RUNNING instance to exit cleanly (via single-instance IPC).
     /// Honored only if that instance armed dev-exit; a production kiosk
@@ -117,7 +117,7 @@ mod tests {
 
     /// E7 (incident #2, 2026-08-01): verification/service modes must never
     /// grab the global OS hotkey — a debug `--conformance` run used to own
-    /// Ctrl+Alt+Shift+Q for its lifetime. Fails if that gate is removed.
+    /// the exit chord for its lifetime. Fails if that gate is removed.
     #[test]
     fn verification_and_service_modes_never_arm_the_chord() {
         let parse = |args: &[&str]| Cli::parse(args.iter().map(|s| s.to_string()));
