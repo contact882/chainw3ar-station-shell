@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Station Sim Console</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { background: #14181f; color: #e6edf3; font: 13px/1.45 "Segoe UI", sans-serif; margin: 0; padding: 14px; user-select: none; }
+    h1 { font-size: 14px; margin: 0 0 10px; letter-spacing: .08em; color: #8b949e; }
+    #status { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-family: Consolas, monospace; white-space: pre; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    button { background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px; padding: 10px 8px; font: inherit; cursor: pointer; }
+    button:hover { background: #30363d; }
+    button.good { border-color: #2ea043; }
+    button.warn { border-color: #b08800; }
+    button.bad  { border-color: #da3633; }
+    button.wide { grid-column: 1 / -1; }
+    .section { font-size: 11px; letter-spacing: .1em; color: #8b949e; margin: 10px 0 6px; }
+    select { width: 100%; background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px; padding: 9px 8px; font: inherit; }
+    #toast { position: fixed; bottom: 10px; left: 14px; right: 14px; color: #d8a02e; font-family: Consolas, monospace; min-height: 1.3em; }
+  </style>
+</head>
+<body>
+  <h1>SIM CONSOLE — simulated results only</h1>
+  <div id="status">connecting…</div>
+
+  <div class="section">TAP (uses armed outcome, then weights)</div>
+  <div class="grid">
+    <button id="tap-good" class="good">TAP — DONE</button>
+    <button id="tap-retry" class="warn">TAP — RETRY</button>
+    <button id="tap-dead" class="bad">TAP — FAILED</button>
+    <button id="tap-random">TAP — WEIGHTED</button>
+    <button id="sticky" class="wide">SAME-GARMENT MODE: OFF (3 retries → failed)</button>
+  </div>
+
+  <div class="section">LINE</div>
+  <div class="grid">
+    <button id="reader-off">READER: UNPLUG</button>
+    <button id="reader-on">READER: PRESENT</button>
+    <button id="down-off">LINE: NOT READY</button>
+    <button id="down-on">LINE: READY</button>
+    <button id="blip" class="wide">BLIP (2s pause + reconnect)</button>
+  </div>
+
+  <div class="section">BATCH / SHIFT</div>
+  <div class="grid">
+    <select id="batch-pick"></select>
+    <button id="apply">ASSIGN BATCH (begin)</button>
+    <button id="swap">SWAP BATCH (keep counts)</button>
+    <button id="end-shift">END SHIFT (remote)</button>
+  </div>
+
+  <div class="section">SHELL</div>
+  <div class="grid">
+    <button id="quit" class="bad wide">QUIT SHELL</button>
+  </div>
+
+  <div id="toast"></div>
+  <script type="module" src="./sim-main.js"></script>
+</body>
+</html>
