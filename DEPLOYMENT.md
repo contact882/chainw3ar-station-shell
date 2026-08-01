@@ -56,6 +56,20 @@ be exactly `station-shell.exe` (plus `--config` if used) — never `--dev-exit`
 (enables a keyboard exit chord), `--sim`, `--windowed`, or any verification
 flag. One-line check for the wrapper config before deployment.
 
+**`--quit` posture (2026-08-01, founder decision):** `station-shell.exe
+--quit` asks a running instance to exit cleanly, and a production kiosk
+REFUSES it (logged: "quit refused — lockdown posture"); it is honored only by
+instances that armed `--dev-exit`. The administrative path for production
+remains remote kill/relaunch (layer 3 above). This refusal is proven by
+`scripts\exit-gate.ps1` case 6 — re-run the gate before every deployment
+image change.
+
+**Exit-path verification (dev/integration machines):** before trusting a dev
+box's escape hatch, run `scripts\exit-gate.ps1` (automated: every armed
+posture exits, lockdown holds, `--quit` round-trips) and `--exit-probe` once
+per physical keyboard (the only test that proves a keyboard can form the
+4-key chord — synthetic input bypasses the key matrix; incident #2).
+
 The process exits deliberately only when: the fault screen itself cannot be
 created (exit **70** — WebView2 environment unusable) or a fatal startup
 error occurs. An external supervisor should relaunch on those exits: Task

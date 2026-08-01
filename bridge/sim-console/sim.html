@@ -5,7 +5,8 @@
   <title>Station Sim Console</title>
   <style>
     :root { color-scheme: dark; }
-    body { background: #14181f; color: #e6edf3; font: 13px/1.45 "Segoe UI", sans-serif; margin: 0; padding: 14px; user-select: none; }
+    html, body { overflow-y: auto; }
+    body { background: #14181f; color: #e6edf3; font: 13px/1.45 "Segoe UI", sans-serif; margin: 0; padding: 14px; padding-bottom: 96px; user-select: none; }
     h1 { font-size: 14px; margin: 0 0 10px; letter-spacing: .08em; color: #8b949e; }
     #status { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-family: Consolas, monospace; white-space: pre; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
@@ -17,7 +18,11 @@
     button.wide { grid-column: 1 / -1; }
     .section { font-size: 11px; letter-spacing: .1em; color: #8b949e; margin: 10px 0 6px; }
     select { width: 100%; background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px; padding: 9px 8px; font: inherit; }
-    #toast { position: fixed; bottom: 10px; left: 14px; right: 14px; color: #d8a02e; font-family: Consolas, monospace; min-height: 1.3em; }
+    /* Toast sits just above the fixed footer so it never covers QUIT SHELL. */
+    #toast { position: fixed; bottom: 68px; left: 14px; right: 14px; color: #d8a02e; font-family: Consolas, monospace; min-height: 1.3em; }
+    /* QUIT SHELL lives in a fixed footer: always on screen no matter how tall the flow grows. */
+    #shell-footer { position: fixed; left: 0; right: 0; bottom: 0; background: #14181f; border-top: 1px solid #30363d; padding: 10px 14px; }
+    #shell-footer button { display: block; width: 100%; }
   </style>
 </head>
 <body>
@@ -53,10 +58,12 @@
   <div class="section">SHELL</div>
   <div class="grid">
     <button id="reset-demo" class="warn wide">RESET DEMO DATA (clears counts + progress)</button>
-    <button id="quit" class="bad wide">QUIT SHELL</button>
   </div>
 
   <div id="toast"></div>
+  <div id="shell-footer">
+    <button id="quit" class="bad">QUIT SHELL</button>
+  </div>
   <script type="module" src="./sim-main.js"></script>
 </body>
 </html>

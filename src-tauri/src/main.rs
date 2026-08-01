@@ -9,6 +9,7 @@ mod commands;
 mod config;
 mod contract;
 mod core;
+mod devexit;
 mod logging;
 mod paths;
 mod persist;
@@ -119,8 +120,24 @@ fn main() {
     // single-instance — a second instance silently exiting 0 would let
     // `--conformance` FALSE-PASS while a station runs. Without the plugin
     // they instead fail loudly on the shared WebView2 data dir.
-    if !cli.conformance && cli.spike.is_none() {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    // `--quit` (E1, incident #2) NEEDS the plugin: it is the transport that
+    // carries the quit request to the running instance.
+    if !cli.conformance && cli.spike.is_none() && !cli.exit_probe {
+        let armed = cli.chord_armed();
+        builder = builder.plugin(tauri_plugin_single_instance::init(move |app, args, _cwd| {
+            // E1: `station-shell.exe --quit` from any terminal lands here in
+            // the RUNNING instance. Honored only when THIS instance armed the
+            // dev exit — the production posture refuses and logs, lockdown
+            // unchanged.
+            if args.iter().any(|a| a == "--quit") {
+                if armed {
+                    tracing::info!("administrative quit (--quit) — shutting down cleanly");
+                    app.exit(0);
+                } else {
+                    tracing::warn!("--quit refused — lockdown posture (dev exit not armed)");
+                }
+                return;
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
@@ -178,6 +195,24 @@ fn main() {
         })
         .setup(move |app| {
             let app_handle = app.handle().clone();
+
+            if cli.quit {
+                // Reaching setup means single-instance found NO primary to
+                // signal (a live one consumes the sender before this runs).
+                // Release builds are windows-subsystem (silent console) —
+                // the exit code is the contract: 3 = nothing to quit.
+                eprintln!("--quit: no running station instance");
+                tracing::warn!("--quit: no running station instance (exit 3)");
+                // Best-effort flush of the non-blocking log writer.
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::process::exit(3);
+            }
+            if cli.exit_probe {
+                // Windowless: only the event loop (the hotkey pump) runs.
+                devexit::spawn_probe(&app_handle)?;
+                return Ok(());
+            }
+
             let (state, session) = deps_seed.expect("deps seed present");
 
             let deps = CoreDeps {
@@ -252,29 +287,15 @@ fn main() {
                 });
             }
 
-            if cli.dev_exit {
+            if cli.chord_armed() {
                 // Dev escape hatch: OS-level global shortcut, deliberately NOT
                 // a page listener — it must work even when the renderer is
                 // hung or black, which is exactly when an exit is needed.
-                // Registered ONLY under --dev-exit; production launches never
-                // contain it. See README "Exiting kiosk mode".
-                use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
-                let chord = Shortcut::new(
-                    Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT),
-                    Code::KeyQ,
-                );
-                app.handle().plugin(
-                    tauri_plugin_global_shortcut::Builder::new()
-                        .with_shortcuts([chord])?
-                        .with_handler(move |app_handle, shortcut, event| {
-                            if event.state() == ShortcutState::Pressed && shortcut == &chord {
-                                tracing::info!("dev exit chord (Ctrl+Alt+Shift+Q) — shutting down cleanly");
-                                app_handle.exit(0);
-                            }
-                        })
-                        .build(),
-                )?;
-                tracing::info!("dev exit chord armed (--dev-exit)");
+                // "Armed" is only logged after a synthetic canary press has
+                // round-tripped the full OS→pump→handler chain; if it doesn't,
+                // the launch refuses (exit 71). See devexit.rs and README
+                // "Exiting kiosk mode".
+                devexit::arm_verified(&app_handle)?;
             }
 
             if cli.conformance {

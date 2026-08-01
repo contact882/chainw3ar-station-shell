@@ -33,7 +33,12 @@ sha2 = "0.10"
 [target.'cfg(windows)'.dependencies]
 # Pinned to tauri 2.11.5's own pins — do not float independently.
 webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_WinRT"] }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_WinRT",
+    # SendInput for the dev-exit delivery canary (devexit.rs, incident #2).
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
 
 [profile.release]
 panic = "abort"

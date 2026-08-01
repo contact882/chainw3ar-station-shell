@@ -21,6 +21,14 @@ pub struct Cli {
     /// mode. Without this flag the chord's listener is never even injected
     /// and the command refuses — production lockdown is unchanged.
     pub dev_exit: bool,
+    /// Ask a RUNNING instance to exit cleanly (via single-instance IPC).
+    /// Honored only if that instance armed dev-exit; a production kiosk
+    /// refuses and logs. Never launches a station itself; exit 3 when no
+    /// instance is running.
+    pub quit: bool,
+    /// Guided verification of the exit chord: synthetic delivery check, then
+    /// a PHYSICAL chord press within 15s. Exit 0/1 (incident #2 2026-08-01).
+    pub exit_probe: bool,
     pub config: Option<PathBuf>,
 }
 
@@ -42,6 +50,8 @@ impl Cli {
                 "--reader-probe" => cli.reader_probe = true,
                 "--dev-exit" => cli.dev_exit = true,
                 "--no-dev-exit" => cli.dev_exit = false,
+                "--quit" => cli.quit = true,
+                "--exit-probe" => cli.exit_probe = true,
                 "--config" => cli.config = args.next().map(PathBuf::from),
                 _ => {}
             }
@@ -50,7 +60,25 @@ impl Cli {
     }
 
     pub fn kiosk(&self) -> bool {
-        !self.windowed && !self.conformance && self.spike.is_none()
+        !self.windowed
+            && !self.conformance
+            && self.spike.is_none()
+            && !self.reader_probe
+            && !self.quit
+            && !self.exit_probe
+    }
+
+    /// Whether THIS launch registers the global exit chord. Verification and
+    /// service modes never do (E7, incident #2): they exit by themselves and
+    /// must not grab an OS-wide hotkey for their lifetime. --exit-probe arms
+    /// through its own path.
+    pub fn chord_armed(&self) -> bool {
+        self.dev_exit
+            && !self.conformance
+            && self.spike.is_none()
+            && !self.reader_probe
+            && !self.quit
+            && !self.exit_probe
     }
 }
 
@@ -85,5 +113,31 @@ mod tests {
         );
         assert!(Cli::parse(["--dev-exit".to_string()].into_iter()).dev_exit);
         assert!(!Cli::parse(["--no-dev-exit".to_string()].into_iter()).dev_exit);
+    }
+
+    /// E7 (incident #2, 2026-08-01): verification/service modes must never
+    /// grab the global OS hotkey — a debug `--conformance` run used to own
+    /// Ctrl+Alt+Shift+Q for its lifetime. Fails if that gate is removed.
+    #[test]
+    fn verification_and_service_modes_never_arm_the_chord() {
+        let parse = |args: &[&str]| Cli::parse(args.iter().map(|s| s.to_string()));
+        assert!(parse(&["--dev-exit"]).chord_armed());
+        assert!(parse(&["--dev-exit", "--sim"]).chord_armed());
+        assert!(!parse(&["--dev-exit", "--conformance"]).chord_armed());
+        assert!(!parse(&["--dev-exit", "--spike", "5"]).chord_armed());
+        assert!(!parse(&["--dev-exit", "--reader-probe"]).chord_armed());
+        assert!(!parse(&["--dev-exit", "--quit"]).chord_armed());
+        assert!(!parse(&["--dev-exit", "--exit-probe"]).chord_armed());
+        assert!(!parse(&["--no-dev-exit"]).chord_armed());
+    }
+
+    /// E1/E3 (incident #2): service modes are not kiosk launches — they must
+    /// not warn about lockdown or create kiosk windows.
+    #[test]
+    fn quit_and_probe_modes_are_not_kiosk() {
+        let parse = |args: &[&str]| Cli::parse(args.iter().map(|s| s.to_string()));
+        assert!(parse(&["--quit"]).quit && !parse(&["--quit"]).kiosk());
+        assert!(parse(&["--exit-probe"]).exit_probe && !parse(&["--exit-probe"]).kiosk());
+        assert!(!parse(&["--reader-probe"]).kiosk());
     }
 }

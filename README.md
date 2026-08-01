@@ -31,6 +31,7 @@ npm run build:web         # init script → src-tauri/gen, harness+sim+UI → ap
 npm run conformance       # ← THE ACCEPTANCE GATE (details below)
 npm test                  # pin gate + tsc + vitest inner loop
 cargo test                # (in src-tauri) state actor, retry, persistence, pin mirror
+powershell -File scripts\exit-gate.ps1   # escape-path gate: exits work, lockdown holds
 ```
 
 **The acceptance gate** (`npm run conformance`) runs the UI's own
@@ -54,37 +55,55 @@ cargo run -- --windowed --sim      # + sim console window (the demo driver)
 cargo run -- --conformance         # acceptance gate
 cargo run -- --spike 20            # reload-freshness proof (see below)
 cargo run -- --reader-probe        # guided hardware gate (see below)
+cargo run -- --exit-probe          # guided exit-chord gate: synthetic + PHYSICAL press (see below)
+station-shell.exe --quit           # ask a RUNNING instance to exit cleanly (see below)
 cargo run -- --config path\station.toml
 ```
 
 ## Exiting kiosk mode (read this BEFORE launching kiosk on a dev box)
 
-**A RELEASE kiosk launch without `--dev-exit` has NO verified escape on this
-hardware. Treat it as reboot-only.** Every row below is what actually
-happened when tested on the reference machine (2026-08-01), after the
-previous version of this section documented untested routes and cost a
-machine a 10-second power-button hold. Anything not personally verified is
-marked UNVERIFIED — do not rely on it.
+**A RELEASE kiosk launch without `--dev-exit` has NO local escape. Treat it
+as reboot-only** (remote kill is the administrative path). Every gate-verified
+row below is enforced by `scripts\exit-gate.ps1` — it launches the real exe in
+every posture, injects the chord, and proves both the exits AND the lockdown.
+Re-run it after any change to exits, windows, or shortcut plumbing; a row
+without a gate case is UNVERIFIED by definition.
 
-| Route | Observed on this machine |
+Since incident #2 (2026-08-01: an armed chord failed in the field and left
+zero evidence), **arming is a proof, not a claim**: every armed launch
+registers the chord plus a canary hotkey, drives a synthetic canary press
+through the full OS→pump→handler chain, and only then logs
+`dev exit chord armed (delivery verified)`. If the canary never comes back the
+launch REFUSES to run (exit 71); if another process holds the chord, the
+launch aborts with no "armed" line at all. The canary proves every software
+layer — it cannot prove a physical keyboard can form the 4-key chord. That is
+`--exit-probe`'s job: step 1 re-proves the synthetic chain, step 2 demands a
+REAL press within 15s (run it once per machine/keyboard; exit code is the
+verdict).
+
+| Route | Status on this machine |
 |---|---|
-| **Ctrl+Alt+Shift+Q** (debug build, no flags) | **EXITS cleanly — VERIFIED.** Debug builds arm the chord by default, so `cargo run` is never a trap. `--no-dev-exit` disarms it deliberately (lockdown rehearsal). |
-| **Ctrl+Alt+Shift+Q** (release + `--dev-exit`) | **EXITS cleanly — VERIFIED.** OS-level hotkey; works even if the page is hung/black. |
-| QUIT SHELL button (`--sim`) | **EXITS cleanly — VERIFIED** (used live in demos). |
-| Ctrl+Alt+Shift+Q (release, no flag) | **Does nothing — VERIFIED.** That's the lockdown, not a bug. |
+| **Ctrl+Alt+Shift+Q** (debug build, no flags) | **EXITS cleanly — gate-verified 2026-08-01.** Debug builds arm by default, so `cargo run` is never a trap; `--no-dev-exit` disarms deliberately. |
+| **Ctrl+Alt+Shift+Q** (release + `--dev-exit`) | **EXITS cleanly — gate-verified 2026-08-01**, all four postures (windowed/kiosk × sim/no-sim), synthetic input. Physical-keyboard proof: `--exit-probe`. |
+| **`station-shell.exe --quit`** (any terminal) | **EXITS the running instance cleanly — gate-verified 2026-08-01** when that instance armed dev-exit; **refused + logged in lockdown posture** (also gate-verified). Exit 3 when nothing is running. The dev exit that depends on no flag memory and no keyboard. |
+| QUIT SHELL button (`--sim`) | **EXITS cleanly — VERIFIED.** Now lives in a fixed footer, always on-screen (incident #2: it sat below the fold of the 720px sim window; vitest-pinned). In kiosk+sim the console can still be BURIED behind the fullscreen kiosk once you touch the operator surface — reach for the chord or `--quit` instead of hunting windows. |
+| Ctrl+Alt+Shift+Q (release, no flag) | **Does nothing — gate-verified.** That's the lockdown; the startup WARN marks the trap in the log. |
 | Alt+F4 | **Does nothing — VERIFIED** (close-prevented by design). |
-| Ctrl+Shift+Esc | **Task Manager LAUNCHES but stays BEHIND the kiosk — VERIFIED** (process confirmed running; screen still shows the kiosk). Blind and unusable unless Task Manager was previously set to "Always on top". Do not rely on it. |
-| Ctrl+Alt+Del → Sign out | **UNVERIFIED.** Failed once in the field ("nothing"); a plausible mechanism is the session-end veto path stalling behind the topmost window. Cannot be tested without ending the session doing the testing. Do not rely on it. |
-| Win+Ctrl+D (virtual desktop) | **UNVERIFIED.** Failed in the field (empty desktops, no route back). Do not rely on it. |
-| `taskkill /f /im station-shell.exe` | Works **from an existing shell** (VERIFIED — used throughout development). The catch: a bare kiosk gives you no way to OPEN a shell locally. Usable via remote access only. |
+| Ctrl+Shift+Esc | **Task Manager opens BEHIND the kiosk — VERIFIED.** Blind; do not rely on it. |
+| Ctrl+Alt+Del → Sign out / Win+Ctrl+D | **UNVERIFIED.** Both failed in the field; do not rely on them. |
+| `taskkill /f /im station-shell.exe` | Works **from an existing shell** (VERIFIED). Remote access only on a bare kiosk. Prefer `--quit` on dev machines — it's graceful and logged. |
 
 - **Standard dev/integration launch: `station-shell.exe --dev-exit --sim`**
   (or plain `cargo run`, which is debug and therefore armed).
-- A release kiosk launch without the chord logs a startup WARNING
-  ("no local escape exists") so the trap is at least visible in the log.
+- **Known residual:** one field failure of a physically pressed chord
+  (2026-08-01 09:16, armed + delivery-healthy configuration) remains
+  unreproduced — every synthetic layer passes the gate, so the physical input
+  path is the suspect. `--exit-probe` on the affected keyboard is the
+  discriminating test; `--quit` removes the keyboard from the loop entirely.
 - **Production**: recovery is the supervisor runbook in `DEPLOYMENT.md`
   (self-recovery → remote administrative restart → power cycle); never put
-  `--dev-exit` in a floor launch configuration.
+  `--dev-exit` in a floor launch configuration. A production kiosk refuses
+  `--quit` by design (founder decision, 2026-08-01).
 
 **`--reader-probe`** verifies the detection path against the real reader with
 automatic PASS/FAIL judging — no windows, no interpretation needed. It walks
@@ -132,6 +151,8 @@ any change to the init script, boot protocol, or window creation.
 
 ## Founder smoke checklist (pre-demo ritual)
 
+0. New machine or new keyboard? `cargo run -- --exit-probe` once and press the
+   chord when prompted — proves the keyboard and the whole exit chain.
 1. `cargo run -- --windowed --sim` — UI boots to batch select; batch names
    are the fixture garments (mock names like "SS26 Denim Jacket" on screen
    mean injection failed).
