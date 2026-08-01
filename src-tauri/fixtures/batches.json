@@ -1,0 +1,6 @@
+[
+  { "id": "b-tee-navy", "name": "NAVY CREW TEE", "total": 300, "completed": 0, "failed": 0 },
+  { "id": "b-hoodie", "name": "FLEECE HOODIE", "total": 180, "completed": 42, "failed": 2 },
+  { "id": "b-cap", "name": "CANVAS CAP", "total": 500, "completed": 499, "failed": 1 },
+  { "id": "b-scarf", "name": "WOOL SCARF", "total": 120, "completed": 120, "failed": 0 }
+]

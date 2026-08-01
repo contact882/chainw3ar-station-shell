@@ -1,0 +1,17 @@
+# Station-level deployment configuration. Operator-visible text must use
+# outcome words only — no technical vocabulary anywhere in this file's
+# operator-facing values.
+
+# Which side of the operator the failed bin physically sits.
+fail_bin_side = "right"
+
+# Substring match for the PC/SC reader this station uses.
+reader_match = "uTrust 3700"
+
+[sim]
+# Default outcome weights for real-reader taps while keying is stubbed.
+# The sim console can arm a forced outcome that overrides one tap.
+weight_keyed = 85
+weight_recoverable = 12
+weight_permanent = 3
+latency_ms = 250
