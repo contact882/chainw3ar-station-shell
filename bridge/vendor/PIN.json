@@ -1,0 +1,12 @@
+{
+  "comment": "The contract is FROZEN. These files are byte-copies of the UI repo at the pinned tag. Any change here is a build error by design — a contract change upstream bumps CONTRACT_VERSION and re-pins, never edits silently.",
+  "repo": "https://github.com/contact882/chainw3ar-station-ui",
+  "tag": "v0.2.0",
+  "commit": "5577e8762fd74e3ce9a3876e081b9dba3bfca08e",
+  "contractVersion": 1,
+  "normalization": "crlf->lf",
+  "sha256": {
+    "contract.ts": "d62df5eb596a02dfdcb36029a27f5ce64eecfafbaaf7fa5b4fd4e11292424f74",
+    "conformance.ts": "8d7224fc646be6d8db71b206ad52ae351c9d3a688673d5218a2238a59108875a"
+  }
+}

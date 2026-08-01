@@ -1,0 +1,8 @@
+node_modules/
+tools/
+vendor/ui-src/
+ui-dist/
+app-dist/
+src-tauri/gen/
+src-tauri/target/
+*.log

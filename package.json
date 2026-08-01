@@ -1,0 +1,22 @@
+{
+  "name": "chainw3ar-station-shell",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "pin": "node scripts/check-contract-pin.mjs",
+    "typecheck": "tsc --noEmit",
+    "fetch-ui": "node scripts/fetch-ui.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "test": "npm run pin && npm run typecheck && vitest run",
+    "conformance": "npm run pin && npm run typecheck && npm run build:web && cargo run --manifest-path src-tauri/Cargo.toml -- --conformance"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

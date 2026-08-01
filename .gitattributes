@@ -1,0 +1,9 @@
+# The vendored contract files are byte-pinned to the UI's v0.2.0 tag blobs.
+# LF everywhere so the pin hashes are stable across checkouts.
+*.ts text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.rs text eol=lf
+*.html text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
