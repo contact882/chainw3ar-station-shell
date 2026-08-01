@@ -73,6 +73,9 @@ const pick = document.getElementById("batch-pick") as HTMLSelectElement;
 on("apply", () => void invoke("apply_batch", { id: pick.value }));
 on("swap", () => void invoke("sim_swap_batch", { id: pick.value }));
 on("end-shift", () => void invoke("sim_end_shift", {}));
+on("reset-demo", () =>
+  void invoke("sim_reset_demo", {}).then(() => loadBatches()),
+);
 on("quit", () => void invoke("sim_quit", {}));
 
 async function loadBatches(): Promise<void> {

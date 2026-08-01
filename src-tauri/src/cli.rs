@@ -27,6 +27,11 @@ pub struct Cli {
 impl Cli {
     pub fn parse(args: impl Iterator<Item = String>) -> Self {
         let mut cli = Cli::default();
+        // Debug builds arm the exit chord BY DEFAULT — `cargo run` must never
+        // be a reboot trap again (incident 2026-08-01). Release stays opt-in;
+        // production lockdown is unchanged. `--no-dev-exit` exists so debug
+        // builds can still rehearse the locked posture deliberately.
+        cli.dev_exit = cfg!(debug_assertions);
         let mut args = args.peekable();
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -36,6 +41,7 @@ impl Cli {
                 "--spike" => cli.spike = args.next().and_then(|n| n.parse().ok()).or(Some(20)),
                 "--reader-probe" => cli.reader_probe = true,
                 "--dev-exit" => cli.dev_exit = true,
+                "--no-dev-exit" => cli.dev_exit = false,
                 "--config" => cli.config = args.next().map(PathBuf::from),
                 _ => {}
             }
@@ -65,5 +71,19 @@ mod tests {
     #[test]
     fn default_is_kiosk() {
         assert!(Cli::parse(std::iter::empty()).kiosk());
+    }
+
+    /// S2 (incident 2026-08-01): this build profile's default exit posture.
+    /// Fails if the debug-default chord arming is ever removed.
+    #[test]
+    fn dev_exit_defaults_follow_build_profile() {
+        let cli = Cli::parse(std::iter::empty());
+        assert_eq!(
+            cli.dev_exit,
+            cfg!(debug_assertions),
+            "debug builds must arm the exit chord by default; release must not"
+        );
+        assert!(Cli::parse(["--dev-exit".to_string()].into_iter()).dev_exit);
+        assert!(!Cli::parse(["--no-dev-exit".to_string()].into_iter()).dev_exit);
     }
 }

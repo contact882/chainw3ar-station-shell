@@ -51,6 +51,12 @@ fn main() {
     let cli = cli::Cli::parse(std::env::args().skip(1));
     let _log_guard = logging::init(&paths::log_dir()).expect("logging init");
     tracing::info!("station-shell starting: {cli:?}");
+    if cli.kiosk() && !cli.dev_exit {
+        tracing::warn!(
+            "kiosk launch without exit chord — NO local escape exists; \
+             recovery is external control or power cycle (see README/DEPLOYMENT)"
+        );
+    }
 
     let station_config = config::StationConfig::load(cli.config.as_deref());
 
@@ -108,12 +114,19 @@ fn main() {
     let protocol_core = core_handle.clone();
     let deps_seed = Some((state, session));
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    let mut builder = tauri::Builder::default();
+    // Gate integrity (C9): verification modes must NEVER register
+    // single-instance — a second instance silently exiting 0 would let
+    // `--conformance` FALSE-PASS while a station runs. Without the plugin
+    // they instead fail loudly on the shared WebView2 data dir.
+    if !cli.conformance && cli.spike.is_none() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
-        }))
+        }));
+    }
+    builder
         .register_uri_scheme_protocol("station", move |_ctx, request| {
             match request.uri().path() {
                 "/boot" => {
@@ -148,6 +161,7 @@ fn main() {
             commands::sim::sim_end_shift,
             commands::sim::sim_arm_policy,
             commands::sim::sim_get_state,
+            commands::sim::sim_reset_demo,
             commands::sim::sim_quit,
             commands::conformance::conformance_reset,
             commands::conformance::conformance_fire_tap,
@@ -174,6 +188,10 @@ fn main() {
                 sim_batches: Some(sim_batches.clone()),
                 session,
                 failures: FailureLog::new(paths::data_dir().join("failures.jsonl")),
+                overruns: crate::persist::failures::OverrunLog::new(
+                    paths::data_dir().join("overruns.jsonl"),
+                ),
+                overrun_policy: station_config.overrun_policy,
                 boot_cache: boot_cache.clone(),
                 pusher: Arc::new(EvalPusher::new(app_handle.clone())),
                 strings: station_config.strings.clone(),

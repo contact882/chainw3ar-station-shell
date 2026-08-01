@@ -24,16 +24,35 @@ pub struct FailureRecord<'a> {
     pub shift_id: &'a str,
 }
 
-pub struct FailureLog {
-    path: PathBuf,
+/// An overrun success: a chip keyed against a batch already at/past total.
+/// Distinct file from failures.jsonl — it is not a failure, it is a
+/// licensing/inventory event the supervisor module must be able to answer
+/// exactly ("why 525/500?"). Log-internal; never operator-visible.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverrunRecord<'a> {
+    pub ts: u64,
+    pub chip_ref: &'a str,
+    pub reader_id: &'a str,
+    pub batch_id: &'a str,
+    pub shift_id: &'a str,
+    pub completed: u32,
+    pub total: u32,
+    /// completed - total after this success (1 for the first overrun unit).
+    pub past_total: u32,
 }
 
-impl FailureLog {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
+pub struct JsonlLog {
+    path: PathBuf,
+    label: &'static str,
+}
+
+impl JsonlLog {
+    pub fn new(path: PathBuf, label: &'static str) -> Self {
+        Self { path, label }
     }
 
-    pub fn append(&self, record: &FailureRecord<'_>) {
+    pub fn append<T: Serialize>(&self, record: &T) {
         let write = || -> anyhow::Result<()> {
             if let Some(parent) = self.path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -45,7 +64,31 @@ impl FailureLog {
             Ok(())
         };
         if let Err(e) = write() {
-            tracing::error!("failure record append failed: {e}");
+            tracing::error!("{} record append failed: {e}", self.label);
         }
+    }
+}
+
+pub struct FailureLog(JsonlLog);
+
+impl FailureLog {
+    pub fn new(path: PathBuf) -> Self {
+        Self(JsonlLog::new(path, "failure"))
+    }
+
+    pub fn append(&self, record: &FailureRecord<'_>) {
+        self.0.append(record);
+    }
+}
+
+pub struct OverrunLog(JsonlLog);
+
+impl OverrunLog {
+    pub fn new(path: PathBuf) -> Self {
+        Self(JsonlLog::new(path, "overrun"))
+    }
+
+    pub fn append(&self, record: &OverrunRecord<'_>) {
+        self.0.append(record);
     }
 }

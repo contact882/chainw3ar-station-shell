@@ -129,6 +129,24 @@ pub async fn sim_get_state(
     core.sim_state().await.map_err(|e| e.to_string())
 }
 
+/// Demo-data reset: wipes accumulated sim batch progress (the "525/500 at
+/// every demo" source) + the persisted session, then reloads the UI so it
+/// boots fresh. Sim window only — never an operator affordance.
+#[tauri::command]
+pub async fn sim_reset_demo(
+    webview: Webview,
+    modes: State<'_, Modes>,
+    core: State<'_, CoreHandle>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    ensure_sim(&webview, &modes)?;
+    core.reset_demo().await.map_err(|e| e.to_string())?;
+    if let Some(window) = tauri::Manager::get_webview_window(&app, "main") {
+        crate::windows::reload_via_com(&window);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn sim_quit(webview: Webview, modes: State<'_, Modes>, app: tauri::AppHandle) -> Result<(), String> {
     ensure_sim(&webview, &modes)?;

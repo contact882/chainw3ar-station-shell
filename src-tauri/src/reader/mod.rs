@@ -78,6 +78,13 @@ fn watch(
             .collect();
 
         report_presence(core, reported_present, !matched.is_empty());
+        if matched.len() > 1 && watched.len() <= 1 {
+            tracing::warn!(
+                "{} readers match this station's filter — one reader per station; \
+                 taps from ALL of them will drive the line",
+                matched.len()
+            );
+        }
 
         if matched != watched {
             card_state.retain(|name, _| matched.contains(name));

@@ -3,6 +3,32 @@
 None of this blocks the simulated-keying milestone; all of it is required
 before a factory floor deployment.
 
+## Supervisor recovery runbook (what to do when a floor machine hangs)
+
+In order. Each layer exists because the one above it can fail.
+
+1. **Do nothing for 60 seconds.** Renderer-class hangs (frozen/black page)
+   self-recover: heartbeat silence or a webview process failure triggers a
+   reload/recreation, logged with its reason, capped at 3 per 60s.
+2. **LINE PAUSED fault screen showing?** That is the shell refusing to
+   flicker: the recovery cap was exceeded and it stopped trying. This state
+   requires a deliberate process restart — remotely (next line) or by a
+   supervisor with machine access. State is safe on disk; restart is
+   lossless. Do NOT configure anything to auto-kill a fault-state process.
+3. **Remote administrative restart — REQUIRED fleet capability.** Every
+   floor machine must have a remote path to kill/relaunch the station
+   process (RDP, management agent, or remote service control). `--dev-exit`
+   is forbidden in production and is not this path. A fleet without remote
+   restart has only layer 4.
+4. **Hard power cycle — the last resort, and acceptable.** The shell's state
+   files are written atomically (temp → fsync → rename): a cut at any
+   instant leaves old-or-new state, never a torn file; worst case is the
+   state as of the last completed tap. `failures.jsonl`/`overruns.jsonl`
+   may carry one torn final line — consumers must tolerate a torn tail.
+   Chip-mid-key and DB-write-in-flight safety are governed-layer
+   obligations (SEAM.md §1.3b) — until the governed layer certifies them,
+   treat a power cycle during active keying as a chip-scrap risk.
+
 ## Fixed Version WebView2 runtime (the most consequential item)
 
 Target machines are offline: the Evergreen runtime cannot be assumed present
@@ -56,6 +82,12 @@ before first factory deployment.
 
 ## Misc
 
+- **USB power management:** disable USB selective suspend on the floor
+  image — an idle-suspended reader appears absent (line pauses safely, but
+  needlessly). Untested over long idle on reference hardware; recorded.
+- **One reader per station:** the shell warns if more than one reader
+  matches its filter and will accept taps from all of them — the floor
+  image/config must guarantee exactly one.
 - **Audio:** UI-owned, tuned relative; absolute SPL is deployment work —
   small powered speaker at the operator position, ~10–15 dB above ambient,
   calibrated with the UI's `?demo=1` loop (run WITHOUT the shell for that).

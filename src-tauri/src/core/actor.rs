@@ -7,7 +7,8 @@ use crate::contract::{PushPayload, TapVerdict};
 use crate::core::messages::{CoreMsg, EndShiftReply, SimStateView};
 use crate::core::retry::{RetryLedger, ESCALATION_THRESHOLD};
 use crate::core::state::{ShiftBeginKind, StationState};
-use crate::persist::failures::{FailureLog, FailureRecord};
+use crate::config::OverrunPolicy;
+use crate::persist::failures::{FailureLog, FailureRecord, OverrunLog, OverrunRecord};
 use crate::persist::session::SessionStore;
 use crate::push::Pusher;
 use crate::seams::batch_source::{BatchSource, SimBatchSource};
@@ -50,6 +51,8 @@ pub struct CoreDeps {
     pub sim_batches: Option<Arc<SimBatchSource>>,
     pub session: SessionStore,
     pub failures: FailureLog,
+    pub overruns: OverrunLog,
+    pub overrun_policy: OverrunPolicy,
     pub boot_cache: Arc<crate::boot::BootCache>,
     pub pusher: Arc<dyn Pusher>,
     pub strings: Option<serde_json::Value>,
@@ -107,6 +110,10 @@ impl CoreHandle {
 
     pub async fn conformance_reset(&self) -> anyhow::Result<()> {
         self.request(|reply| CoreMsg::ConformanceReset { reply }).await
+    }
+
+    pub async fn reset_demo(&self) -> anyhow::Result<()> {
+        self.request(|reply| CoreMsg::ResetDemo { reply }).await
     }
 
     pub async fn sim_state(&self) -> anyhow::Result<SimStateView> {
@@ -177,21 +184,47 @@ impl CoreActor {
     }
 
     /// THE ordering invariant: persist → boot cache → push. Nothing observable
-    /// leaves the process before the state that produced it is on disk.
+    /// leaves the process before the state that produced it is on disk. A
+    /// persist FAILURE pauses the line (founder decision): the recovery
+    /// contract can't be honored, so `connected` must not claim it can.
     fn commit(&mut self, payload: &PushPayload) {
-        if let Err(e) = self.deps.session.save(&self.state.to_persisted()) {
-            tracing::error!("session persist failed: {e}");
-        }
+        let saved = self.try_persist();
         self.refresh_boot_cache();
         self.deps.pusher.push(payload);
+        self.update_persist_health(saved);
     }
 
     /// Persist without pushing (endShift bookkeeping, arm flags).
     fn persist_quietly(&mut self) {
-        if let Err(e) = self.deps.session.save(&self.state.to_persisted()) {
-            tracing::error!("session persist failed: {e}");
-        }
+        let saved = self.try_persist();
         self.refresh_boot_cache();
+        self.update_persist_health(saved);
+    }
+
+    fn try_persist(&mut self) -> bool {
+        match self.deps.session.save(&self.state.to_persisted()) {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::error!("session persist failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// Flip the line on persistence-health changes. The pause payload rides
+    /// AFTER whatever verdict/data payload triggered the failed write, so
+    /// the operator sees their tap's result, then LINE PAUSED.
+    fn update_persist_health(&mut self, ok: bool) {
+        if let Some(payload) = self.state.set_persist_ok(ok) {
+            if ok {
+                tracing::info!("session persistence recovered — line resuming");
+                let _ = self.try_persist();
+            } else {
+                tracing::error!("session persistence BROKEN — pausing the line until it recovers");
+            }
+            self.refresh_boot_cache();
+            self.deps.pusher.push(&payload);
+        }
     }
 
     async fn handle(&mut self, msg: CoreMsg) {
@@ -301,6 +334,26 @@ impl CoreActor {
                 self.refresh_boot_cache();
                 let _ = reply.send(());
             }
+            CoreMsg::ResetDemo { reply } => {
+                let seq = self.state.seq;
+                let config = self.state.snapshot.config;
+                let (reader, downstream, persist) =
+                    (self.state.reader_present, self.state.downstream_ready, self.state.persist_ok);
+                self.state = StationState::new(config, None);
+                self.state.seq = seq;
+                let _ = self.state.set_connection_inputs(Some(reader), Some(downstream));
+                let _ = self.state.set_persist_ok(persist);
+                self.retry.clear_all();
+                if let Some(b) = &self.deps.sim_batches {
+                    b.reset();
+                }
+                if let Err(e) = self.deps.session.reset() {
+                    tracing::error!("demo reset: session reset failed: {e}");
+                }
+                self.refresh_boot_cache();
+                tracing::info!("demo data reset (sim console)");
+                let _ = reply.send(());
+            }
             CoreMsg::Tick => self.on_tick(),
         }
     }
@@ -358,6 +411,15 @@ impl CoreActor {
             tracing::warn!("chip presented with no active batch — ignored");
             return;
         };
+        // Overrun gate BEFORE keying: chips are consumed physically, so a
+        // blocked tap must never reach the keying layer at all.
+        if batch.completed >= batch.total && self.deps.overrun_policy == OverrunPolicy::Block {
+            tracing::warn!(
+                "tap past batch total blocked (policy=block, batch {} at {}/{})",
+                batch.id, batch.completed, batch.total
+            );
+            return;
+        }
         if let (Some(f), Some(sim)) = (forced, self.deps.sim_keying.as_ref()) {
             sim.arm(|p| p.forced_next = Some(f));
         }
@@ -422,12 +484,44 @@ impl CoreActor {
             None
         };
 
+        // Overrun accounting (policy=allow): a success that lands past total
+        // consumed a chip beyond the batch plan — record it distinctly so
+        // "why 525/500?" has an exact, auditable answer.
+        if verdict == TapVerdict::Success {
+            if let Some(updated) = &updated_batch {
+                if updated.completed > updated.total {
+                    self.deps.overruns.append(&OverrunRecord {
+                        ts: Self::now_ms(),
+                        chip_ref: &chip_ref.0,
+                        reader_id: &reader_id,
+                        batch_id: &updated.id,
+                        shift_id: &shift_id,
+                        completed: updated.completed,
+                        total: updated.total,
+                        past_total: updated.completed - updated.total,
+                    });
+                    tracing::warn!(
+                        "OVERRUN: batch {} now {}/{} (+{} past total)",
+                        updated.id, updated.completed, updated.total,
+                        updated.completed - updated.total
+                    );
+                }
+            }
+        }
+
         let payload = self.state.record_verdict(verdict, updated_batch);
         self.last_verdict_at = Some(Instant::now());
         self.commit(&payload);
     }
 
     fn on_tick(&mut self) {
+        // Persistence-recovery probe: while broken, retry each tick; the line
+        // resumes the moment a write succeeds.
+        if !self.state.persist_ok {
+            let ok = self.deps.session.save(&self.state.to_persisted()).is_ok();
+            self.update_persist_health(ok);
+        }
+
         if let Some(until) = self.blip_until {
             if Instant::now() >= until {
                 self.blip_until = None;
@@ -479,19 +573,27 @@ mod tests {
         dir: std::path::PathBuf,
     }
 
+    const RIG_FIXTURES: &str = r#"[
+        {"id":"b1","name":"B ONE","total":10,"completed":0,"failed":0},
+        {"id":"b2","name":"B TWO","total":5,"completed":0,"failed":0},
+        {"id":"b-edge","name":"B EDGE","total":3,"completed":2,"failed":0}]"#;
+
     async fn rig(timing: Timing) -> Rig {
+        rig_with(timing, OverrunPolicy::Allow, "session.json", |_| {}).await
+    }
+
+    async fn rig_with(
+        timing: Timing,
+        overrun_policy: OverrunPolicy,
+        session_file: &str,
+        prepare: impl FnOnce(&std::path::Path),
+    ) -> Rig {
         let dir = std::env::temp_dir().join(format!("station-actor-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
+        prepare(&dir); // e.g. plant a persistence blocker BEFORE the actor's first commit
         let config = StationUiConfig { fail_bin_side: FailBinSide::Right };
         let keying = Arc::new(SimKeying::new(SimPolicy { latency_ms: 0, ..SimPolicy::default() }));
-        let batches = Arc::new(
-            SimBatchSource::from_fixture_json(
-                r#"[{"id":"b1","name":"B ONE","total":10,"completed":0,"failed":0},
-                    {"id":"b2","name":"B TWO","total":5,"completed":0,"failed":0}]"#,
-                None,
-            )
-            .unwrap(),
-        );
+        let batches = Arc::new(SimBatchSource::from_fixture_json(RIG_FIXTURES, None).unwrap());
         let pusher = VecPusher::new();
         let state = StationState::new(config, None);
         let boot_cache = Arc::new(crate::boot::BootCache::new(&state.boot_payload(None)));
@@ -501,8 +603,10 @@ mod tests {
             batch_source: batches.clone() as Arc<dyn BatchSource>,
             sim_keying: Some(keying.clone()),
             sim_batches: Some(batches),
-            session: SessionStore::new(dir.join("session.json")),
+            session: SessionStore::new(dir.join(session_file)),
             failures: FailureLog::new(dir.join("failures.jsonl")),
+            overruns: OverrunLog::new(dir.join("overruns.jsonl")),
+            overrun_policy,
             boot_cache,
             pusher: pusher.clone(),
             strings: None,
@@ -638,6 +742,98 @@ mod tests {
         let session: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(rig.dir.join("session.json")).unwrap()).unwrap();
         assert_eq!(session["pendingEndShift"], false, "confirmed delivery is persisted");
+    }
+
+    /// S4/B4: overrun counting stays unclamped shell-side (+1 exactly per
+    /// success) and every success past total writes a distinct OVERRUN
+    /// record. Fails if clamping is introduced or the records are removed.
+    #[tokio::test]
+    async fn overrun_success_counts_unclamped_and_writes_records() {
+        let rig = rig(Timing::default()).await;
+        rig.handle.select_batch("b-edge".into()).await.unwrap(); // starts 2/3
+        rig.pusher.take();
+        for _ in 0..4 {
+            tap(&rig, ForcedOutcome::Keyed).await; // → 3,4,5,6 of 3
+        }
+        let payloads = rig.pusher.take();
+        let last = payloads.last().unwrap().snapshot.as_ref().unwrap();
+        assert_eq!(last.current_batch.as_ref().unwrap().completed, 6, "true numbers, never clamped");
+        assert_eq!(last.session_counts.done, 4, "+1 exactly per success");
+
+        let records: Vec<serde_json::Value> = std::fs::read_to_string(rig.dir.join("overruns.jsonl"))
+            .expect("overrun records must exist")
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(records.len(), 3, "successes landing PAST total (4,5,6 of 3) each record");
+        assert_eq!(records[0]["pastTotal"], 1);
+        assert_eq!(records[2]["pastTotal"], 3);
+        assert_eq!(records[0]["batchId"], "b-edge");
+        assert!(records[0]["chipRef"].as_str().unwrap().starts_with("sim-"));
+    }
+
+    /// S4/B4: under overrun_policy = block, a presentation at/past total
+    /// produces NO keying call, no verdict, no chip consumption.
+    #[tokio::test]
+    async fn block_policy_refuses_taps_at_total_before_keying() {
+        let rig = rig_with(Timing::default(), OverrunPolicy::Block, "session.json", |_| {}).await;
+        rig.handle.select_batch("b-edge".into()).await.unwrap(); // 2/3
+        rig.pusher.take();
+        tap(&rig, ForcedOutcome::Keyed).await; // 2<3 → allowed → 3/3
+        assert_eq!(verdicts(&rig.pusher.take()), vec![TapVerdict::Success]);
+        tap(&rig, ForcedOutcome::Keyed).await; // at total → refused
+        tap(&rig, ForcedOutcome::Keyed).await; // still refused
+        let payloads = rig.pusher.take();
+        assert!(
+            verdicts(&payloads).is_empty(),
+            "no verdict may be emitted for a blocked tap (and no chip consumed)"
+        );
+        assert!(
+            !rig.dir.join("overruns.jsonl").exists(),
+            "blocked taps never reach keying, so no overrun can be recorded"
+        );
+    }
+
+    /// S8/C1: a persist failure pauses the line (connected must not claim a
+    /// tap is fully processable when its count can't be saved), and the line
+    /// resumes automatically once persistence recovers.
+    #[tokio::test]
+    async fn persist_failure_pauses_line_and_recovery_resumes_it() {
+        let timing = Timing { tick_ms: 10, ..Timing::default() };
+        // A FILE sits where the session's parent dir must go — planted BEFORE
+        // the actor's first commit, so persistence is broken from the start.
+        let rig = rig_with(timing, OverrunPolicy::Allow, "blocked/session.json", |dir| {
+            std::fs::write(dir.join("blocked"), b"in the way").unwrap();
+        })
+        .await;
+        let blocker = rig.dir.join("blocked");
+
+        rig.handle.select_batch("b1".into()).await.unwrap(); // commit fails to persist
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let payloads = rig.pusher.take();
+        assert!(
+            payloads.iter().flat_map(|p| &p.events).any(|e| matches!(
+                e,
+                WireEvent::Connection { state: crate::contract::ConnectionState::Disconnected }
+            )),
+            "persist failure must pause the line"
+        );
+        // Taps while paused produce nothing (line is honest).
+        tap(&rig, ForcedOutcome::Keyed).await;
+        assert!(verdicts(&rig.pusher.take()).is_empty());
+
+        // Persistence recovers → line resumes on its own within a few ticks.
+        std::fs::remove_file(&blocker).unwrap();
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let payloads = rig.pusher.take();
+        assert!(
+            payloads.iter().flat_map(|p| &p.events).any(|e| matches!(
+                e,
+                WireEvent::Connection { state: crate::contract::ConnectionState::Connected }
+            )),
+            "line must resume when persistence recovers"
+        );
+        assert!(rig.dir.join("blocked/session.json").exists(), "state persisted after recovery");
     }
 
     #[tokio::test]

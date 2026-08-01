@@ -56,6 +56,10 @@ pub struct StationState {
     pub seq: u64,
     pub reader_present: bool,
     pub downstream_ready: bool,
+    /// False while session persistence is failing (disk full, path broken).
+    /// Folded into `connected`: a tap whose count would vanish on the next
+    /// crash is NOT "fully processed", so the line pauses (founder decision).
+    pub persist_ok: bool,
     pub shift: Option<ShiftMeta>,
     pub pending_end_shift: bool,
 }
@@ -82,6 +86,7 @@ impl StationState {
             seq: 0,
             reader_present: false,
             downstream_ready: false,
+            persist_ok: true,
             shift,
             pending_end_shift: pending,
         }
@@ -138,7 +143,17 @@ impl StationState {
         if let Some(d) = downstream_ready {
             self.downstream_ready = d;
         }
-        let next = if self.reader_present && self.downstream_ready {
+        self.recompute_connection()
+    }
+
+    /// Persistence health input — third leg of the `connected` bit.
+    pub fn set_persist_ok(&mut self, ok: bool) -> Option<PushPayload> {
+        self.persist_ok = ok;
+        self.recompute_connection()
+    }
+
+    fn recompute_connection(&mut self) -> Option<PushPayload> {
+        let next = if self.reader_present && self.downstream_ready && self.persist_ok {
             ConnectionState::Connected
         } else {
             ConnectionState::Disconnected

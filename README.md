@@ -57,27 +57,33 @@ cargo run -- --reader-probe        # guided hardware gate (see below)
 cargo run -- --config path\station.toml
 ```
 
-## Exiting kiosk mode (read this BEFORE launching bare kiosk on a dev box)
+## Exiting kiosk mode (read this BEFORE launching kiosk on a dev box)
 
-Kiosk is fullscreen, always-on-top, close-blocked, no taskbar — **a bare
-`station-shell.exe` launch has NO in-app exit. That is correct for the floor
-(stations have no keyboard) and a trap on a dev machine.** Someone rebooted a
-machine to learn this; don't be next.
+**A RELEASE kiosk launch without `--dev-exit` has NO verified escape on this
+hardware. Treat it as reboot-only.** Every row below is what actually
+happened when tested on the reference machine (2026-08-01), after the
+previous version of this section documented untested routes and cost a
+machine a 10-second power-button hold. Anything not personally verified is
+marked UNVERIFIED — do not rely on it.
 
-- **Dev launches: add `--dev-exit`** → **Ctrl+Alt+Shift+Q** exits cleanly.
-  It is an OS-level hotkey registered by the shell process only when the
-  flag is present — nothing exists in the page, no visible control, and it
-  works even when the webview is hung or black (exactly the case an escape
-  hatch is for). Without the flag there is nothing to trigger; production
-  lockdown is untouched. Use `station-shell.exe --dev-exit --sim` as the
-  standard dev/integration launch.
-- **With `--sim`**: the sim console's QUIT SHELL button also exits cleanly.
-- **Forgot both flags?** Escape hatches, in order of reliability:
-  `Ctrl+Alt+Del` → Sign out (the secure screen sits above everything; note
-  Task Manager itself may open BEHIND the kiosk window); or `Win+Ctrl+D`
-  (new virtual desktop) → open a terminal →
-  `taskkill /f /im station-shell.exe`. State is crash-safe either way.
-- **Production**: exit is service control only (`DEPLOYMENT.md`); never put
+| Route | Observed on this machine |
+|---|---|
+| **Ctrl+Alt+Shift+Q** (debug build, no flags) | **EXITS cleanly — VERIFIED.** Debug builds arm the chord by default, so `cargo run` is never a trap. `--no-dev-exit` disarms it deliberately (lockdown rehearsal). |
+| **Ctrl+Alt+Shift+Q** (release + `--dev-exit`) | **EXITS cleanly — VERIFIED.** OS-level hotkey; works even if the page is hung/black. |
+| QUIT SHELL button (`--sim`) | **EXITS cleanly — VERIFIED** (used live in demos). |
+| Ctrl+Alt+Shift+Q (release, no flag) | **Does nothing — VERIFIED.** That's the lockdown, not a bug. |
+| Alt+F4 | **Does nothing — VERIFIED** (close-prevented by design). |
+| Ctrl+Shift+Esc | **Task Manager LAUNCHES but stays BEHIND the kiosk — VERIFIED** (process confirmed running; screen still shows the kiosk). Blind and unusable unless Task Manager was previously set to "Always on top". Do not rely on it. |
+| Ctrl+Alt+Del → Sign out | **UNVERIFIED.** Failed once in the field ("nothing"); a plausible mechanism is the session-end veto path stalling behind the topmost window. Cannot be tested without ending the session doing the testing. Do not rely on it. |
+| Win+Ctrl+D (virtual desktop) | **UNVERIFIED.** Failed in the field (empty desktops, no route back). Do not rely on it. |
+| `taskkill /f /im station-shell.exe` | Works **from an existing shell** (VERIFIED — used throughout development). The catch: a bare kiosk gives you no way to OPEN a shell locally. Usable via remote access only. |
+
+- **Standard dev/integration launch: `station-shell.exe --dev-exit --sim`**
+  (or plain `cargo run`, which is debug and therefore armed).
+- A release kiosk launch without the chord logs a startup WARNING
+  ("no local escape exists") so the trap is at least visible in the log.
+- **Production**: recovery is the supervisor runbook in `DEPLOYMENT.md`
+  (self-recovery → remote administrative restart → power cycle); never put
   `--dev-exit` in a floor launch configuration.
 
 **`--reader-probe`** verifies the detection path against the real reader with
@@ -103,6 +109,15 @@ ATR byte *length* only.
   recognize a re-tapped chip (use SAME-GARMENT MODE to demo escalation).
   Sim constraint only: real per-chip identity comes from the governed keying
   layer's `chip_ref` (SEAM.md §1.3).
+- **Demo data accumulates by design** (batch progress is inventory-scoped
+  and survives restarts) — the fixture CANVAS CAP deliberately ships at
+  **499/500** so one success demos BATCH COMPLETE, which means demo sessions
+  quickly show overruns like 525/500. That display is contract-honest (the
+  UI never clamps; overshoot is information) and every overrun success is
+  recorded in `overruns.jsonl`. To start a demo clean: sim console →
+  **RESET DEMO DATA**. Production policy knob: `overrun_policy` in
+  station.toml (`allow` = count + record, default; `block` = taps past total
+  never reach keying).
 
 ## Why reloads are lossless (`--spike`)
 

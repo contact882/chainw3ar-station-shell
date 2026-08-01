@@ -131,6 +131,30 @@ source.** Requirements:
   Prefer a derived/HMAC'd token over a raw UID if raw UIDs are themselves
   sensitive — the shell does not care, only stability matters.
 
+### 1.3b Crash/power safety — REQUIRED (added after the 2026-08-01 incident review)
+
+A floor machine's last-resort recovery is a hard power cycle (see
+DEPLOYMENT.md runbook). The shell's own state is crash-consistent by
+construction (atomic persist-before-emit), so the governed layer must match
+that bar:
+
+- **`key_chip` must be power-cut-safe at every instant**: a cut mid-call
+  must leave the chip either NOT keyed, or keyed in a state the layer can
+  verify on the next presentation. Ambiguity is resolved BY THE LAYER (e.g.
+  verify-before-commit, or re-verification when an ambiguous chip is
+  re-presented) — the shell has no chip visibility and cannot help.
+- **The record write must be transactional** — committed or absent, never
+  torn. The shell tolerates `record_outcome` errors (counts session-side,
+  logs loudly) but cannot repair a half-written row.
+- The shell guarantees its half: no verdict is counted or emitted before
+  your outcome returns, so a cut mid-call costs at most one un-counted,
+  un-flashed tap — the operator re-taps.
+- **Overrun note:** the shell enforces `overrun_policy` (config: allow+
+  record / block) BEFORE calling `key_chip`, but batch AUTHORIZATION is
+  ultimately yours — if licensing forbids keying past a batch's total, refuse
+  in the layer (a `Permanent`/`NotReady`-class outcome per your rules) rather
+  than trusting station config.
+
 ### 1.4 Complete error-case matrix (what the shell does with every outcome)
 
 | Situation in the governed layer | You return | Shell behavior, exactly |

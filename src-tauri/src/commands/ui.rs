@@ -38,24 +38,43 @@ pub fn log_console(level: String, message: String) {
     crate::logging::log_ui_console(&level, &message);
 }
 
-/// Millisecond timestamp of the page's last heartbeat, for the watchdog.
-pub struct Heartbeat(pub AtomicU64);
+/// Page-heartbeat tracker for the watchdog. MONOTONIC by construction:
+/// wall-clock (SystemTime) is settable — a forward NTP/manual jump >30s
+/// would have faked a silent page and triggered a spurious reload. Instant
+/// cannot jump.
+pub struct Heartbeat {
+    start: std::time::Instant,
+    last_ms: AtomicU64, // ms since `start` at the last beat
+}
 
 impl Heartbeat {
-    pub fn now_ms() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
-    }
     pub fn new() -> Arc<Self> {
-        Arc::new(Self(AtomicU64::new(Self::now_ms())))
+        Arc::new(Self { start: std::time::Instant::now(), last_ms: AtomicU64::new(0) })
     }
     pub fn touch(&self) {
-        self.0.store(Self::now_ms(), Ordering::Relaxed);
+        self.last_ms
+            .store(self.start.elapsed().as_millis() as u64, Ordering::Relaxed);
     }
     pub fn age_ms(&self) -> u64 {
-        Self::now_ms().saturating_sub(self.0.load(Ordering::Relaxed))
+        (self.start.elapsed().as_millis() as u64)
+            .saturating_sub(self.last_ms.load(Ordering::Relaxed))
+    }
+}
+
+#[cfg(test)]
+mod heartbeat_tests {
+    use super::Heartbeat;
+
+    #[test]
+    fn age_is_monotonic_elapsed_since_touch_not_wall_clock() {
+        let hb = Heartbeat::new();
+        hb.touch();
+        assert!(hb.age_ms() < 250, "fresh touch reads near-zero age");
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        let age = hb.age_ms();
+        assert!((40..5_000).contains(&age), "age tracks monotonic elapsed, got {age}ms");
+        hb.touch();
+        assert!(hb.age_ms() < 250, "touch resets age");
     }
 }
 

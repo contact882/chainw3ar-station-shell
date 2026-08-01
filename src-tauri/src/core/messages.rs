@@ -61,6 +61,11 @@ pub enum CoreMsg {
     Blip { ms: u64 },
     GetSimState { reply: Reply<SimStateView> },
 
+    /// Sim-console demo reset: wipe accumulated sim batch progress + session,
+    /// keep connection inputs. The command reloads the UI afterward so it
+    /// boots fresh from the reset snapshot.
+    ResetDemo { reply: Reply<()> },
+
     // ── Plumbing ───────────────────────────────────────────────────────────
     /// External tick injection (tests); the actor also self-ticks.
     #[allow(dead_code)]

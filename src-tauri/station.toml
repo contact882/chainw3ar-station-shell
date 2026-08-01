@@ -8,6 +8,12 @@ fail_bin_side = "right"
 # Substring match for the PC/SC reader this station uses.
 reader_match = "uTrust 3700"
 
+# Taps arriving with the batch already at/past total:
+#   "allow" — key, count, and write a distinct record to overruns.jsonl
+#   "block" — the tap never reaches keying (no chip consumed, no verdict)
+# Chips are consumed physically; the governed layer owns final authorization.
+overrun_policy = "allow"
+
 [sim]
 # Default outcome weights for real-reader taps while keying is stubbed.
 # The sim console can arm a forced outcome that overrides one tap.
