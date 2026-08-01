@@ -13,6 +13,8 @@ sha2 = "0.10"
 [dependencies]
 tauri = "2.11.5"
 tauri-plugin-single-instance = "2.4.3"
+# --dev-exit escape hatch only; registered exclusively under that flag.
+tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "time", "macros", "rt-multi-thread"] }

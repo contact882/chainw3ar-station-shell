@@ -69,3 +69,4 @@ pub fn heartbeat(hb: State<'_, Arc<Heartbeat>>) {
 pub fn boot_snapshot(cache: State<'_, Arc<BootCache>>) -> Result<serde_json::Value, String> {
     serde_json::from_str(&cache.load()).map_err(|e| e.to_string())
 }
+

@@ -17,6 +17,10 @@ pub struct Cli {
     /// Guided hardware verification of the detection path against the real
     /// reader (no windows, no webview). Exit 0/1.
     pub reader_probe: bool,
+    /// Dev escape hatch: enables the Ctrl+Alt+Shift+Q exit chord in kiosk
+    /// mode. Without this flag the chord's listener is never even injected
+    /// and the command refuses — production lockdown is unchanged.
+    pub dev_exit: bool,
     pub config: Option<PathBuf>,
 }
 
@@ -31,6 +35,7 @@ impl Cli {
                 "--conformance" => cli.conformance = true,
                 "--spike" => cli.spike = args.next().and_then(|n| n.parse().ok()).or(Some(20)),
                 "--reader-probe" => cli.reader_probe = true,
+                "--dev-exit" => cli.dev_exit = true,
                 "--config" => cli.config = args.next().map(PathBuf::from),
                 _ => {}
             }

@@ -25,6 +25,11 @@ a human or remote service action to restart the process (state is on disk;
 the restart is lossless). **Do not configure the wrapper to kill a
 fault-state process automatically** — it is saying something is wrong.
 
+**Launch-flag audit for floor machines:** the production launch command must
+be exactly `station-shell.exe` (plus `--config` if used) — never `--dev-exit`
+(enables a keyboard exit chord), `--sim`, `--windowed`, or any verification
+flag. One-line check for the wrapper config before deployment.
+
 The process exits deliberately only when: the fault screen itself cannot be
 created (exit **70** — WebView2 environment unusable) or a fatal startup
 error occurs. An external supervisor should relaunch on those exits: Task

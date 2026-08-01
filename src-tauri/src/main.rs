@@ -234,6 +234,31 @@ fn main() {
                 });
             }
 
+            if cli.dev_exit {
+                // Dev escape hatch: OS-level global shortcut, deliberately NOT
+                // a page listener — it must work even when the renderer is
+                // hung or black, which is exactly when an exit is needed.
+                // Registered ONLY under --dev-exit; production launches never
+                // contain it. See README "Exiting kiosk mode".
+                use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+                let chord = Shortcut::new(
+                    Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT),
+                    Code::KeyQ,
+                );
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_shortcuts([chord])?
+                        .with_handler(move |app_handle, shortcut, event| {
+                            if event.state() == ShortcutState::Pressed && shortcut == &chord {
+                                tracing::info!("dev exit chord (Ctrl+Alt+Shift+Q) — shutting down cleanly");
+                                app_handle.exit(0);
+                            }
+                        })
+                        .build(),
+                )?;
+                tracing::info!("dev exit chord armed (--dev-exit)");
+            }
+
             if cli.conformance {
                 // No reader thread, no watchdog reloads, no spontaneous pushes
                 // — but a hung harness must not hang the gate.

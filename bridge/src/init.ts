@@ -90,6 +90,11 @@ declare global {
     io.invoke("heartbeat").catch(() => {});
   }, 5000);
 
+  // NOTE: the --dev-exit escape hatch is deliberately NOT implemented here.
+  // A DOM listener dies with the renderer — useless in exactly the hung-page
+  // case where an escape hatch matters. It lives in Rust as an OS-level
+  // global shortcut (see main.rs), registered only under --dev-exit.
+
   if (new URLSearchParams(window.location.search).get("harness") === "1") {
     window.__STATION_HARNESS__ = {
       reinstall() {

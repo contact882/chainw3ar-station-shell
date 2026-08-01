@@ -57,6 +57,29 @@ cargo run -- --reader-probe        # guided hardware gate (see below)
 cargo run -- --config path\station.toml
 ```
 
+## Exiting kiosk mode (read this BEFORE launching bare kiosk on a dev box)
+
+Kiosk is fullscreen, always-on-top, close-blocked, no taskbar — **a bare
+`station-shell.exe` launch has NO in-app exit. That is correct for the floor
+(stations have no keyboard) and a trap on a dev machine.** Someone rebooted a
+machine to learn this; don't be next.
+
+- **Dev launches: add `--dev-exit`** → **Ctrl+Alt+Shift+Q** exits cleanly.
+  It is an OS-level hotkey registered by the shell process only when the
+  flag is present — nothing exists in the page, no visible control, and it
+  works even when the webview is hung or black (exactly the case an escape
+  hatch is for). Without the flag there is nothing to trigger; production
+  lockdown is untouched. Use `station-shell.exe --dev-exit --sim` as the
+  standard dev/integration launch.
+- **With `--sim`**: the sim console's QUIT SHELL button also exits cleanly.
+- **Forgot both flags?** Escape hatches, in order of reliability:
+  `Ctrl+Alt+Del` → Sign out (the secure screen sits above everything; note
+  Task Manager itself may open BEHIND the kiosk window); or `Win+Ctrl+D`
+  (new virtual desktop) → open a terminal →
+  `taskkill /f /im station-shell.exe`. State is crash-safe either way.
+- **Production**: exit is service control only (`DEPLOYMENT.md`); never put
+  `--dev-exit` in a floor launch configuration.
+
 **`--reader-probe`** verifies the detection path against the real reader with
 automatic PASS/FAIL judging — no windows, no interpretation needed. It walks
 you through the four hardware cases: (1) empty reader → no phantom
