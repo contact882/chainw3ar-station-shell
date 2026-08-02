@@ -15,11 +15,42 @@ In order. Each layer exists because the one above it can fail.
    requires a deliberate process restart — remotely (next line) or by a
    supervisor with machine access. State is safe on disk; restart is
    lossless. Do NOT configure anything to auto-kill a fault-state process.
-3. **Remote administrative restart — REQUIRED fleet capability.** Every
-   floor machine must have a remote path to kill/relaunch the station
-   process (RDP, management agent, or remote service control). `--dev-exit`
-   is forbidden in production and is not this path. A fleet without remote
-   restart has only layer 4.
+3. **Remote administrative restart — REQUIRED fleet capability, and the
+   ONLY remote path BY CONSTRUCTION (2026-08-01 finding).** Every floor
+   machine must have a remote path to kill/relaunch the station process
+   (RDP, management agent, or remote service control). This is load-bearing,
+   not a nice-to-have, because every alternative is structurally closed for
+   a remote supervisor:
+   - The exit chord is unavailable remotely twice over: it is never armed in
+     production, and remote-desktop clients intercept modifier+function
+     chords before they reach the machine (observed live over AnyDesk).
+   - `--quit` is refused by the production posture (founder decision), and
+     even where armed it is session-scoped: it only sees a station in the
+     same Windows session as the shell it runs from (session-local mutex +
+     window message). A session-0 agent or different-user RDP shell gets
+     exit 3 with the kiosk still running.
+   - What DOES work remotely and cross-session: `taskkill /f /im
+     station-shell.exe` (or service control) from an elevated shell, then
+     relaunch via the wrapper. **Verified live 2026-08-02:** force-kill of an
+     armed running station left `session.json` byte-identical (SHA-256
+     readback), still-valid JSON; relaunch logged `crash/restart recovery:
+     resuming persisted shift`; clean exit after. (This kill happened while
+     idle — the kill-DURING-a-write case rests on the atomic temp→fsync→rename
+     design plus the earlier live mid-shift kills; worst case remains state
+     as of the last completed tap.)
+   A fleet without remote restart therefore has only layer 4 — and a power
+   cycle during active keying is recorded chip-scrap risk until the governed
+   layer certifies crash-safety (SEAM.md §1.3b). If §1.3b turns out unsafe,
+   remote restart stops being infrastructure and becomes the SOLE safe
+   recovery. Tracked as CHA-54 item 6.
+
+   **Supervisor rule for `--quit` exit 3 (CHA-54 item 7):** exit 3 means "no
+   station visible from THIS session", NOT "no station running". Before
+   concluding a machine is down: `tasklist /fi "imagename eq
+   station-shell.exe"` — if a process shows, you are in the wrong session;
+   use the elevated `taskkill` above. A sender-side disambiguation (exit 3 =
+   none anywhere, exit 4 = running in another session) is proposed on
+   CHA-54, not yet implemented.
 4. **Hard power cycle — the last resort, and acceptable.** The shell's state
    files are written atomically (temp → fsync → rename): a cut at any
    instant leaves old-or-new state, never a torn file; worst case is the
@@ -59,8 +90,12 @@ flag. One-line check for the wrapper config before deployment.
 **`--quit` posture (2026-08-01, founder decision):** `station-shell.exe
 --quit` asks a running instance to exit cleanly, and a production kiosk
 REFUSES it (logged: "quit refused — lockdown posture"); it is honored only by
-instances that armed `--dev-exit`. The administrative path for production
-remains remote kill/relaunch (layer 3 above). This refusal is proven by
+instances that armed `--dev-exit`. It is also SESSION-SCOPED: it must run
+from a shell in the same Windows session as the station (a screen-sharing
+client's terminal qualifies — verified live over AnyDesk; a session-0 agent
+or different-user RDP shell does not, and gets exit 3 with the station still
+running). The administrative path for production remains remote
+kill/relaunch (layer 3 above). The refusal is proven by
 `scripts\exit-gate.ps1` case 6 — re-run the gate before every deployment
 image change.
 

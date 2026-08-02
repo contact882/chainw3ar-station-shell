@@ -70,7 +70,38 @@ Re-run it after any change to exits, windows, or shortcut plumbing; a row
 without a gate case is UNVERIFIED by definition.
 
 **The primary dev escape is `station-shell.exe --quit` — no keyboard in the
-loop.** The chord (below) is the convenience for when no terminal is handy.
+loop, so it is the only route that works in every access mode.** The chord
+(below) is the convenience for someone physically at the machine.
+
+**REMOTE ACCESS — the chord does not survive remote desktop.** Observed
+2026-08-01: Ctrl+Shift+F12 failed over AnyDesk — remote-desktop clients
+(AnyDesk, RDP, TeamViewer, VNC) commonly intercept modifier+function chords
+before they reach the machine. Not a shell defect (the chord is proven on a
+physical keyboard at the machine); it is unavailable BY CONSTRUCTION to a
+remote supervisor. For remote sessions the escape is `--quit`, with one
+session rule, verified/analyzed 2026-08-01:
+
+- `--quit` finds the station via a session-local mutex + window message
+  (single-instance IPC) — it only sees a station running in the SAME Windows
+  session as the shell it is typed into.
+- A terminal opened through a screen-sharing client (AnyDesk-style) runs in
+  the console session — same session as the kiosk → works. **VERIFIED live
+  while an AnyDesk session was active on this machine** (sender exit 0,
+  station exited, administrative-quit logged, 23:44Z).
+- A shell from RDP-as-a-different-user, SSH, PsExec, or a session-0
+  management agent is a DIFFERENT session → `--quit` exits 3 with the kiosk
+  still alive. **Source-proven (non-Global mutex; window messages cannot
+  cross sessions), empirically UNVERIFIED on this machine (needs an
+  elevated second session).** Treat exit 3 as "no station visible FROM THIS
+  SESSION", not "no station running" — before concluding a machine is down,
+  `tasklist /fi "imagename eq station-shell.exe"`; if a process shows, you
+  are in the wrong session (CHA-54 item 7 tracks a sender-side fix).
+- Cross-session remote kill is `taskkill /f /im station-shell.exe` from an
+  elevated shell (session-independent). **Verified live 2026-08-02**:
+  force-kill of an armed running station left `session.json` byte-identical
+  (SHA-256 readback), relaunch resumed the persisted shift, clean exit
+  after — a force-kill is not a clean shutdown, and the atomic-persist
+  guarantee held under readback, not assumption.
 
 Since incident #2 (2026-08-01: an armed chord failed in the field and left
 zero evidence), **arming is a proof, not a claim**: every armed launch
@@ -110,15 +141,15 @@ Anyone proposing a 4-key chord again: this paragraph is the answer.
 
 | Route | Status on this machine |
 |---|---|
-| **`station-shell.exe --quit`** (any terminal) | **PRIMARY. EXITS the running instance cleanly — gate-verified 2026-08-01** when that instance armed dev-exit; **refused + logged in lockdown posture** (also gate-verified). Exit 3 when nothing is running. No flag memory, no keyboard. |
-| **Ctrl+Shift+F12 held 2s** (debug build, no flags) | **EXITS cleanly — gate-verified 2026-08-01.** Debug builds arm by default, so `cargo run` is never a trap; `--no-dev-exit` disarms deliberately. |
-| **Ctrl+Shift+F12 held 2s** (release + `--dev-exit`) | **EXITS cleanly — gate-verified 2026-08-01**, all four postures (windowed/kiosk × sim/no-sim), synthetic input. A sub-hold tap does NOT exit (gate case 0). Physical proof per keyboard: `--exit-probe`. |
+| **`station-shell.exe --quit`** (terminal in the station's session) | **PRIMARY. EXITS the running instance cleanly — gate-verified 2026-08-01**, and live-verified during an active AnyDesk session, when that instance armed dev-exit; **refused + logged in lockdown posture** (also gate-verified). Exit 3 = no station visible from THIS session (see remote note). No flag memory, no keyboard, works in every access mode. |
+| **Ctrl+Shift+F12 held 2s** (physical keyboard at the machine; debug build, no flags) | **EXITS cleanly — gate-verified 2026-08-01.** Debug builds arm by default, so `cargo run` is never a trap; `--no-dev-exit` disarms deliberately. NOT usable over remote-desktop clients (see remote note). |
+| **Ctrl+Shift+F12 held 2s** (physical keyboard at the machine; release + `--dev-exit`) | **EXITS cleanly — gate-verified 2026-08-01**, all four postures (windowed/kiosk × sim/no-sim), synthetic input. A sub-hold tap does NOT exit (gate case 0). Physical proof per keyboard: `--exit-probe`. NOT usable over remote-desktop clients (see remote note). |
 | QUIT SHELL button (`--sim`) | **EXITS cleanly — VERIFIED.** Lives in a fixed footer, always on-screen (incident #2: it sat below the fold of the 720px sim window; vitest-pinned). In kiosk+sim the console can still be BURIED behind the fullscreen kiosk once you touch the operator surface — reach for `--quit` or the chord instead of hunting windows. |
 | Ctrl+Shift+F12 (release, no flag) | **Does nothing — gate-verified.** That's the lockdown; the startup WARN marks the trap in the log. |
 | Alt+F4 | **Does nothing — VERIFIED** (close-prevented by design). |
 | Ctrl+Shift+Esc | **Task Manager opens BEHIND the kiosk — VERIFIED.** Blind; do not rely on it. |
 | Ctrl+Alt+Del → Sign out / Win+Ctrl+D | **UNVERIFIED.** Both failed in the field; do not rely on them. |
-| `taskkill /f /im station-shell.exe` | Works **from an existing shell** (VERIFIED). Remote access only on a bare kiosk. Prefer `--quit` — it's graceful and logged. |
+| `taskkill /f /im station-shell.exe` | Works **from an existing elevated shell, cross-session — VERIFIED 2026-08-02 with state readback** (session.json byte-identical after force-kill; shift resumed on relaunch). The only route that survives every remote closure. Prefer `--quit` where same-session — it's graceful and logged. |
 
 - **Standard dev/integration launch: `station-shell.exe --dev-exit --sim`**
   (or plain `cargo run`, which is debug and therefore armed).
