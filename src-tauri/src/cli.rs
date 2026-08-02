@@ -23,8 +23,10 @@ pub struct Cli {
     pub dev_exit: bool,
     /// Ask a RUNNING instance to exit cleanly (via single-instance IPC).
     /// Honored only if that instance armed dev-exit; a production kiosk
-    /// refuses and logs. Never launches a station itself; exit 3 when no
-    /// instance is running.
+    /// refuses and logs. Never launches a station itself. Exit 3 = no
+    /// station-shell process anywhere on this machine; exit 4 = a process
+    /// named station-shell.exe exists but is unreachable from this session
+    /// (name match only — use elevated taskkill). CHA-54 item 7.
     pub quit: bool,
     /// Guided verification of the exit chord: synthetic delivery check, then
     /// a PHYSICAL chord press within 15s. Exit 0/1 (incident #2 2026-08-01).

@@ -27,8 +27,10 @@ In order. Each layer exists because the one above it can fail.
    - `--quit` is refused by the production posture (founder decision), and
      even where armed it is session-scoped: it only sees a station in the
      same Windows session as the shell it runs from (session-local mutex +
-     window message). A session-0 agent or different-user RDP shell gets
-     exit 3 with the kiosk still running.
+     window message). A session-0 agent or different-user RDP shell cannot
+     reach it — expected exit 4 ("unreachable station-shell process, name
+     match only"); cross-session behaviour is source-proven, empirically
+     UNVERIFIED (needs an elevated second session).
    - What DOES work remotely and cross-session: `taskkill /f /im
      station-shell.exe` (or service control) from an elevated shell, then
      relaunch via the wrapper. **Verified live 2026-08-02:** force-kill of an
@@ -44,13 +46,15 @@ In order. Each layer exists because the one above it can fail.
    remote restart stops being infrastructure and becomes the SOLE safe
    recovery. Tracked as CHA-54 item 6.
 
-   **Supervisor rule for `--quit` exit 3 (CHA-54 item 7):** exit 3 means "no
-   station visible from THIS session", NOT "no station running". Before
-   concluding a machine is down: `tasklist /fi "imagename eq
-   station-shell.exe"` — if a process shows, you are in the wrong session;
-   use the elevated `taskkill` above. A sender-side disambiguation (exit 3 =
-   none anywhere, exit 4 = running in another session) is proposed on
-   CHA-54, not yet implemented.
+   **Supervisor rule for `--quit` exit codes (CHA-54 item 7 — SHIPPED,
+   gate-proven):** the sender scans processes system-wide before exiting.
+   Exit 3 = no station-shell process anywhere on this machine. Exit 4 = a
+   process named station-shell.exe exists but is unreachable from this
+   session — NAME MATCH ONLY (does not confirm build or health; the
+   sender's message says so): use the elevated `taskkill` above. Manual
+   cross-check: `tasklist /fi "imagename eq station-shell.exe"`. The gate
+   proves exit 4 with a same-session unreachable instance; the
+   cross-session variant stays UNVERIFIED (elevation limit).
 4. **Hard power cycle — the last resort, and acceptable.** The shell's state
    files are written atomically (temp → fsync → rename): a cut at any
    instant leaves old-or-new state, never a torn file; worst case is the

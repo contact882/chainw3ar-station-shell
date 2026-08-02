@@ -89,13 +89,20 @@ session rule, verified/analyzed 2026-08-01:
   while an AnyDesk session was active on this machine** (sender exit 0,
   station exited, administrative-quit logged, 23:44Z).
 - A shell from RDP-as-a-different-user, SSH, PsExec, or a session-0
-  management agent is a DIFFERENT session → `--quit` exits 3 with the kiosk
-  still alive. **Source-proven (non-Global mutex; window messages cannot
-  cross sessions), empirically UNVERIFIED on this machine (needs an
-  elevated second session).** Treat exit 3 as "no station visible FROM THIS
-  SESSION", not "no station running" — before concluding a machine is down,
-  `tasklist /fi "imagename eq station-shell.exe"`; if a process shows, you
-  are in the wrong session (CHA-54 item 7 tracks a sender-side fix).
+  management agent is a DIFFERENT session → the single-instance transport
+  cannot reach the station. **Source-proven (non-Global mutex; window
+  messages cannot cross sessions), empirically UNVERIFIED on this machine
+  (needs an elevated second session).**
+- **Exit codes (CHA-54 item 7, shipped + gate-proven):** before exiting,
+  the sender scans processes system-wide (process lists DO cross sessions).
+  **Exit 3** = no station-shell process anywhere on this machine. **Exit 4**
+  = a process named station-shell.exe exists but `--quit` cannot reach it —
+  **name match only**: it does not confirm which build it is or whether it
+  is healthy, and the sender's own message says so. On exit 4, use the
+  elevated `taskkill` below. Manual cross-check remains
+  `tasklist /fi "imagename eq station-shell.exe"`. The gate proves exit 4
+  via a same-session unreachable instance; the cross-session variant is
+  expected to exit 4 but stays UNVERIFIED (same elevation limit as above).
 - Cross-session remote kill is `taskkill /f /im station-shell.exe` from an
   elevated shell (session-independent). **Verified live 2026-08-02**:
   force-kill of an armed running station left `session.json` byte-identical
@@ -141,7 +148,7 @@ Anyone proposing a 4-key chord again: this paragraph is the answer.
 
 | Route | Status on this machine |
 |---|---|
-| **`station-shell.exe --quit`** (terminal in the station's session) | **PRIMARY. EXITS the running instance cleanly — gate-verified 2026-08-01**, and live-verified during an active AnyDesk session, when that instance armed dev-exit; **refused + logged in lockdown posture** (also gate-verified). Exit 3 = no station visible from THIS session (see remote note). No flag memory, no keyboard, works in every access mode. |
+| **`station-shell.exe --quit`** (terminal in the station's session) | **PRIMARY. EXITS the running instance cleanly — gate-verified 2026-08-01**, and live-verified during an active AnyDesk session, when that instance armed dev-exit; **refused + logged in lockdown posture** (also gate-verified). Exit 3 = no station anywhere (scan-verified); exit 4 = unreachable station-shell process exists, name match only (see remote note; both gate-proven). No flag memory, no keyboard, works in every access mode. |
 | **Ctrl+Shift+F12 held 2s** (physical keyboard at the machine; debug build, no flags) | **EXITS cleanly — gate-verified 2026-08-01.** Debug builds arm by default, so `cargo run` is never a trap; `--no-dev-exit` disarms deliberately. NOT usable over remote-desktop clients (see remote note). |
 | **Ctrl+Shift+F12 held 2s** (physical keyboard at the machine; release + `--dev-exit`) | **EXITS cleanly — gate-verified 2026-08-01**, all four postures (windowed/kiosk × sim/no-sim), synthetic input. A sub-hold tap does NOT exit (gate case 0). Physical proof per keyboard: `--exit-probe`. NOT usable over remote-desktop clients (see remote note). |
 | QUIT SHELL button (`--sim`) | **EXITS cleanly — VERIFIED.** Lives in a fixed footer, always on-screen (incident #2: it sat below the fold of the 720px sim window; vitest-pinned). In kiosk+sim the console can still be BURIED behind the fullscreen kiosk once you touch the operator surface — reach for `--quit` or the chord instead of hunting windows. |

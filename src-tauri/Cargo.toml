@@ -38,6 +38,10 @@ windows = { version = "0.61", features = [
     "Win32_System_WinRT",
     # SendInput for the dev-exit delivery canary (devexit.rs, incident #2).
     "Win32_UI_Input_KeyboardAndMouse",
+    # --quit exit-3/4 split (CHA-54 item 7): system-wide process scan —
+    # process lists cross sessions, window messages don't.
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_RemoteDesktop",
 ] }
 
 [profile.release]

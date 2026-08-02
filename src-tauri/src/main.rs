@@ -48,6 +48,60 @@ fn load_fixture_json() -> String {
         .unwrap_or_else(|| EMBEDDED_FIXTURES.to_string())
 }
 
+/// Every OTHER process named station-shell.exe on this machine, as
+/// (pid, session). NAME MATCH ONLY — this cannot verify build, health, or
+/// that it is really a station (opening another session's process for a
+/// path check generally needs elevation). Process lists ARE visible across
+/// sessions, unlike window messages — which is exactly what lets `--quit`
+/// distinguish "nothing to quit" (exit 3) from "unreachable from this
+/// session" (exit 4). CHA-54 item 7.
+#[cfg(windows)]
+fn other_station_processes() -> Vec<(u32, u32)> {
+    // `::windows` — the extern crate; plain `windows` is our own module here.
+    use ::windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use ::windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+    let mut found = Vec::new();
+    let me = std::process::id();
+    unsafe {
+        let snap = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            Ok(s) => s,
+            Err(_) => return found,
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        if Process32FirstW(snap, &mut entry).is_ok() {
+            loop {
+                let len = entry
+                    .szExeFile
+                    .iter()
+                    .position(|c| *c == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+                if entry.th32ProcessID != me && name.eq_ignore_ascii_case("station-shell.exe") {
+                    let mut session = 0u32;
+                    let _ = ProcessIdToSessionId(entry.th32ProcessID, &mut session);
+                    found.push((entry.th32ProcessID, session));
+                }
+                if Process32NextW(snap, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = ::windows::Win32::Foundation::CloseHandle(snap);
+    }
+    found
+}
+
+#[cfg(not(windows))]
+fn other_station_processes() -> Vec<(u32, u32)> {
+    Vec::new()
+}
+
 fn main() {
     let cli = cli::Cli::parse(std::env::args().skip(1));
     let _log_guard = logging::init(&paths::log_dir()).expect("logging init");
@@ -197,15 +251,46 @@ fn main() {
             let app_handle = app.handle().clone();
 
             if cli.quit {
-                // Reaching setup means single-instance found NO primary to
-                // signal (a live one consumes the sender before this runs).
-                // Release builds are windows-subsystem (silent console) —
-                // the exit code is the contract: 3 = nothing to quit.
-                eprintln!("--quit: no running station instance");
-                tracing::warn!("--quit: no running station instance (exit 3)");
+                // Reaching setup means single-instance found NO primary in
+                // THIS session (a live one consumes the sender before this
+                // runs). A system-wide scan splits the remaining truth —
+                // exit 3 = no station-shell process anywhere on this machine;
+                // exit 4 = a process named station-shell.exe exists but is
+                // unreachable from here (NAME MATCH ONLY — no claim about
+                // build or health; the message says so). Release builds are
+                // windows-subsystem (silent console) — exit codes are the
+                // contract. CHA-54 item 7.
+                let others = other_station_processes();
+                if others.is_empty() {
+                    eprintln!("--quit: no station-shell process running anywhere on this machine");
+                    tracing::warn!("--quit: no station running anywhere (exit 3)");
+                } else {
+                    let list = others
+                        .iter()
+                        .map(|(pid, session)| format!("pid {pid} session {session}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!(
+                        "--quit: cannot reach a station from this session, but {} process(es) \
+                         named station-shell.exe exist: {list}.",
+                        others.len()
+                    );
+                    eprintln!(
+                        "Name match only — this does not confirm which build it is or whether \
+                         it is healthy."
+                    );
+                    eprintln!(
+                        "If you expected to quit it: taskkill /f /im station-shell.exe \
+                         (elevated shell)."
+                    );
+                    tracing::warn!(
+                        "--quit: unreachable station-shell process(es): {list} — \
+                         name match only (exit 4)"
+                    );
+                }
                 // Best-effort flush of the non-blocking log writer.
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                std::process::exit(3);
+                std::process::exit(if others.is_empty() { 3 } else { 4 });
             }
             if cli.exit_probe {
                 // Windowless: only the event loop (the hotkey pump) runs.

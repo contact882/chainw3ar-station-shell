@@ -16,7 +16,9 @@ param(
 )
 
 $Exe = (Resolve-Path $Exe).Path
-$LogFile = Join-Path $env:APPDATA "com.chainw3ar.station\logs\shell.log.$(Get-Date -Format yyyy-MM-dd)"
+# The shell's daily log rolls on the UTC date, not local (bit this gate once
+# at 21:xx local / 01:xx UTC — behaviors passed, every log assertion missed).
+$LogFile = Join-Path $env:APPDATA "com.chainw3ar.station\logs\shell.log.$([DateTime]::UtcNow.ToString('yyyy-MM-dd'))"
 $Fails = 0
 
 # Chord since incident #2's hardware finding: Ctrl+Shift+F12 HELD 2s.
@@ -138,10 +140,28 @@ Assert (-not $p.HasExited) "still running after refused --quit"
 Stop-Leftovers
 Assert $true "(cleaned up via taskkill-equivalent -- the only intended path)"
 
-# ---- Case 7: --quit with nothing running -----------------------------------
-Write-Host "case: --quit with no instance running"
+# ---- Case 7: --quit with nothing running anywhere --> exit 3 ---------------
+Write-Host "case: --quit with no station-shell process anywhere"
 $sender = Start-Process -FilePath $Exe -ArgumentList @("--quit") -PassThru -Wait
-Assert ($sender.ExitCode -eq 3) "exit 3 = nothing to quit (got $($sender.ExitCode))"
+Assert ($sender.ExitCode -eq 3) "exit 3 = no station anywhere (got $($sender.ExitCode))"
+
+# ---- Case 7b: --quit with an UNREACHABLE name-match --> exit 4 --------------
+# An --exit-probe instance skips single-instance registration by design, so
+# it is a real station-shell.exe process the sender cannot reach — exactly
+# exit 4's honest semantics (name match only). This produces the SAME-SESSION
+# unreachable variant; the cross-session variant (session-0 agent, other-user
+# RDP) is source-proven but UNVERIFIED here — it needs an elevated second
+# session this gate does not have. Do not upgrade it on this case's strength.
+Write-Host "case: --quit with unreachable station-shell process -> exit 4"
+$mark = Get-LogLen
+$probe = Start-Process -FilePath $Exe -ArgumentList @("--exit-probe") -PassThru
+Start-Sleep -Seconds 2
+Assert (-not $probe.HasExited) "probe instance (unreachable name-match) is running"
+$sender = Start-Process -FilePath $Exe -ArgumentList @("--quit") -PassThru -Wait
+Assert ($sender.ExitCode -eq 4) "exit 4 = unreachable process exists (got $($sender.ExitCode))"
+Assert (Wait-Pattern "name match only (exit 4)" $mark 8) "honest-semantics line logged"
+Assert (-not $probe.HasExited) "probe instance untouched by the sender"
+Stop-Leftovers
 
 # ---- Case 8: a held chord makes an armed launch REFUSE (never silent) ------
 Write-Host "case: chord held by another process -> armed launch aborts"
